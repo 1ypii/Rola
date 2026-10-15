@@ -588,6 +588,15 @@
   });
 
   Rk.feature({
+    id: 'site.hideUncheckedLabel',
+    category: 'site',
+    name: 'Hide unchecked label',
+    description: 'Hides the Unchecked age check label next to your name in the sidebar.',
+    default: false,
+    css: hide(':is(#left-navigation-container, #navigation) span.large\:fill.large\:justify-end')
+  });
+
+  Rk.feature({
     id: 'site.hideNotificationBell',
     category: 'site',
     name: 'Hide notification bell',

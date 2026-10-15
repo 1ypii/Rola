@@ -1159,18 +1159,12 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         badge.style.cssText = 'width: var(--icon-size-small, 16px); height: var(--icon-size-small, 16px); margin: 0;';
         return badge;
       };
-      Rk.observe('.age-bracket-label-username, #navigation .dynamic-ellipsis-item', name => {
+      Rk.observe('.age-bracket-label-username', name => {
         if (name.hasAttribute('data-rk-self-verified') || name.parentElement.querySelector('.verified-badge-icon-header, [class*="verified-badge-icon" i]')) return;
         name.setAttribute('data-rk-self-verified', '');
-        if (name.classList.contains('dynamic-ellipsis-item')) name.classList.add('verified-badge-left-nav');
         const badge = navBadge();
         badge.classList.add('verified-badge-icon-header');
         name.after(el('section', null, badge));
-      });
-      Rk.observe('a[href$="/users/profile"] > span .text-truncate-end', name => {
-        if (name.hasAttribute('data-rk-self-verified') || name.parentElement.querySelector('[aria-label*="verified" i], [class*="verified" i]')) return;
-        name.setAttribute('data-rk-self-verified', '');
-        name.after(navBadge());
       });
     }
   });
