@@ -1312,13 +1312,71 @@
   });
 
   Rk.feature({
+    id: 'tools.fakeRobux',
+    category: 'tools',
+    name: 'Custom Robux balance',
+    description: 'Shows your own number as your Robux balance in the header. Only you can see it, your real balance does not change.',
+    default: false,
+    options: [
+      { key: 'amount', label: 'Robux', type: 'number', min: 0, max: 999999999999, step: 1, default: 1000 }
+    ],
+    async run(ctx) {
+      const me = await Rk.me();
+      const json = me ? await Rk.api.get(`https://economy.roblox.com/v1/users/${me.id}/currency`).catch(() => null) : null;
+      const real = json && Number.isSafeInteger(json.robux) ? json.robux : null;
+      if (real === null) return;
+      const full = new Intl.NumberFormat();
+      const short = value => {
+        if (value < 10000) return full.format(value);
+        const text = String(value);
+        const suffix = ['', 'K+', 'M+', 'B+', 'T+'][Math.min(Math.floor(Math.log(value) / Math.log(1000)), 4)];
+        const cut = value < 1e6 ? 3 : value < 1e9 ? 6 : value < 1e12 ? 9 : 12;
+        return text.slice(0, text.length - cut) + suffix;
+      };
+      const swaps = () => {
+        const fake = Math.floor(ctx.option('amount'));
+        return new Map([[full.format(real), full.format(fake)], [short(real), short(fake)], [String(real), String(fake)]]);
+      };
+      let applied = swaps();
+      let current = applied;
+      const swapText = text => {
+        if (!text.parentElement || !text.parentElement.closest('#navbar-robux, .nav-foundation-menu')) return;
+        const raw = text.nodeValue;
+        const next = current.get(raw.trim());
+        if (next !== undefined && next !== raw.trim()) text.nodeValue = raw.replace(raw.trim(), next);
+      };
+      const swapIn = root => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let text = walker.nextNode(); text; text = walker.nextNode()) swapText(text);
+      };
+      new MutationObserver(records => {
+        for (const record of records) {
+          if (record.type === 'characterData') swapText(record.target);
+          else for (const node of record.addedNodes) {
+            if (node.nodeType === 3) swapText(node);
+            else if (node.nodeType === 1) swapIn(node);
+          }
+        }
+      }).observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+      swapIn(document.body);
+      Rk.onSettings(() => {
+        const next = Rk.isEnabled(ctx.id) ? swaps() : new Map();
+        current = new Map(next);
+        for (const [key, value] of applied) current.set(value, next.has(key) ? next.get(key) : key);
+        applied = next;
+        swapIn(document.body);
+      });
+    }
+  });
+
+  Rk.feature({
     id: 'tools.breakReminder',
     category: 'tools',
     name: 'Break reminder',
     description: 'Reminds you to take a break after a set amount of time on the site.',
     default: false,
     options: [
-      { key: 'minutes', label: 'Remind me after (minutes)', type: 'number', min: 15, max: 240, step: 5, default: 60 }
+      { key: 'minutes', label: 'Remind me after (minutes)', type: 'number', min: 1, step: 1, default: 60 }
     ],
     run(ctx) {
       onVisibleMinutes(count => {
@@ -1330,9 +1388,22 @@
         const notified = fresh ? 0 : Math.max(0, Number(saved.notified) || 0);
         const step = Math.floor(minutes / ctx.option('minutes'));
         Rk.store.set('tools.breakReminder', { minutes, last: now, notified: Math.max(step, notified) });
-        if (step > notified) ui.toast(`You have been on Roblox for ${minutes} minutes`, { tone: 'warning', duration: 8000 });
+        if (step > notified) {
+          ui.toast(`You have been on Roblox for ${minutes} minutes`, { tone: 'warning', duration: 8000 });
+          Rk.bg('sound').catch(() => {});
+        }
       });
     }
+  });
+
+  Rk.feature({
+    id: 'tools.alertSound',
+    category: 'tools',
+    name: 'Notification sound',
+    description: 'Plays a sound with alerts and reminders. Put a Roblox audio id to use it instead of the default chime.',
+    options: [
+      { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Default chime', default: '' }
+    ]
   });
 
   Rk.feature({

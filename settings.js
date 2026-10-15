@@ -4,6 +4,7 @@
 
   let panel = null;
   let activeCategory = Rk.categories[0].id;
+  let lastScroll = 0;
   let query = '';
   let localChange = false;
 
@@ -43,7 +44,7 @@
         const next = Number(field.value);
         if (!withLocalChange(() => Rk.setOption(entry.id, def.key, next))) {
           field.value = String(Rk.option(entry.id, def.key));
-          ui.toast(`Pick a number between ${def.min} and ${def.max}`, { tone: 'warning' });
+          ui.toast(def.max == null ? `Pick a number of at least ${def.min}` : `Pick a number between ${def.min} and ${def.max}`, { tone: 'warning' });
         }
       });
       return field;
@@ -179,6 +180,8 @@
     if (!panel) return;
     const current = panel;
     panel = null;
+    lastScroll = current.list.scrollTop;
+    Rk.store.set('settings.view', { category: activeCategory, scroll: lastScroll });
     document.documentElement.style.overflow = current.previousOverflow;
     current.backdrop.classList.remove('rk-modal-open');
     current.backdrop.addEventListener('transitionend', () => current.backdrop.remove(), { once: true });
@@ -253,12 +256,18 @@
 
   const open = () => {
     if (panel) return;
+    const saved = Rk.store.get('settings.view', null);
+    if (saved && Rk.categories.some(item => item.id === saved.category)) {
+      activeCategory = saved.category;
+      lastScroll = Number(saved.scroll) || 0;
+    }
     panel = build();
     panel.previousOverflow = document.documentElement.style.overflow;
     document.documentElement.style.overflow = 'hidden';
     renderList();
     updateCounts();
     document.body.append(panel.backdrop);
+    panel.list.scrollTop = lastScroll;
     requestAnimationFrame(() => {
       if (!panel) return;
       panel.backdrop.classList.add('rk-modal-open');

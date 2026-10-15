@@ -3,7 +3,7 @@
   "name": "Rola",
   "version": "1.0.0",
   "description": "A large set of quality of life features for the Roblox website, styled to match it.",
-  "minimum_chrome_version": "111",
+  "minimum_chrome_version": "116",
   "icons": {
     "16": "icon16.png",
     "32": "icon32.png",
@@ -24,7 +24,8 @@
     "storage",
     "alarms",
     "notifications",
-    "downloads"
+    "downloads",
+    "offscreen"
   ],
   "host_permissions": [
     "https://*.roblox.com/*",

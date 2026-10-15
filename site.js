@@ -71,28 +71,6 @@
   });
 
   Rk.feature({
-    id: 'site.hideAds',
-    category: 'site',
-    name: 'Hide ads',
-    description: 'Hides banner ads and sponsored slots across the site.',
-    css: hide([
-      '.ads-container',
-      '.abp',
-      '.abp-spacer',
-      '.abp-container',
-      '.top-abp-container',
-      '#AdvertisingLeaderboard',
-      '#AdvertisementRight',
-      '#MessagesAdSkyscraper',
-      '.Ads_WideSkyscraper',
-      '.profile-ads-container',
-      '#ad',
-      'iframe[src*="user-sponsorship"]',
-      'iframe[src*="/userads/"]'
-    ].join(',\n'))
-  });
-
-  Rk.feature({
     id: 'site.hideChat',
     category: 'site',
     name: 'Hide chat',
@@ -116,8 +94,8 @@
     sidebarWatched = true;
     Rk.observe('.left-nav', nav => {
       let root = nav;
-      while (root.parentElement && root.parentElement !== document.body && !root.parentElement.querySelector('#content, #container-main, .container-main')) root = root.parentElement;
-      if (root !== document.body && !root.querySelector('#content, #container-main, .container-main')) root.setAttribute('data-rk-sidebar', '');
+      while (root.parentElement && root.parentElement !== document.body && !root.parentElement.querySelector('#content, #container-main, .container-main, #header')) root = root.parentElement;
+      if (root !== document.body && !root.querySelector('#content, #container-main, .container-main, #header')) root.setAttribute('data-rk-sidebar', '');
     });
   };
 
@@ -301,6 +279,7 @@
           else node.removeAttribute('title');
         };
         const show = () => {
+          if (Rk.isEnabled('tools.fakeRobux')) return;
           const text = node.textContent.trim();
           if (applied && text === applied && !Rk.isEnabled(ctx.id)) {
             applied = '';

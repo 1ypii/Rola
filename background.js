@@ -72,6 +72,32 @@ const robloxRequest = async (url, { method = 'GET', body } = {}) => {
   return res.json();
 };
 
+const soundAsset = settings => {
+  const options = settings && settings.options && settings.options['tools.alertSound'];
+  const value = options && typeof options.assetId === 'string' ? options.assetId.trim() : '';
+  return /^\d{1,20}$/.test(value) ? value : null;
+};
+
+const audioUrl = async assetId => {
+  const json = await robloxRequest(`https://assetdelivery.roblox.com/v2/assetId/${assetId}`);
+  const location = json && Array.isArray(json.locations) && json.locations[0] ? json.locations[0].location : null;
+  if (typeof location !== 'string') throw new Error('audio has no location');
+  const target = new URL(location);
+  if (target.protocol !== 'https:' || !/(^|\.)rbxcdn\.com$/i.test(target.hostname)) throw new Error('audio host not allowed');
+  return target.href;
+};
+
+const playSound = async () => {
+  const settings = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
+  if (settings && settings.enabled && settings.enabled['tools.alertSound'] === false) return;
+  const assetId = soundAsset(settings);
+  const src = assetId ? await audioUrl(assetId).catch(() => null) : null;
+  try {
+    await chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['AUDIO_PLAYBACK'], justification: 'Plays the notification sound' });
+  } catch {}
+  await chrome.runtime.sendMessage({ type: 'rk-play', src }).catch(() => {});
+};
+
 const notify = (title, message, url) => {
   const id = `rk|${Date.now()}|${isRobloxUrl(url) ? url : 'https://www.roblox.com/home'}`;
   chrome.notifications.create(id, {
@@ -79,8 +105,10 @@ const notify = (title, message, url) => {
     iconUrl: NOTIFY_ICON,
     title: cleanText(title, 80),
     message: cleanText(message, 200),
-    priority: 0
+    priority: 0,
+    silent: true
   });
+  playSound().catch(() => {});
 };
 
 const isOn = (settings, id) => Boolean(settings && settings.enabled && settings.enabled[id] === true);
@@ -188,6 +216,7 @@ const handlers = {
     return true;
   },
   download: payload => download(payload || {}),
+  sound: () => playSound().then(() => true),
   'poll-now': () => poll().then(() => true)
 };
 
@@ -207,6 +236,12 @@ chrome.action.onClicked.addListener(async tab => {
     if (opened) return;
   }
   chrome.tabs.create({ url: 'https://www.roblox.com/home#rk-settings' });
+});
+
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (sender.id !== chrome.runtime.id || !message || message.type !== 'rk-sound-done') return false;
+  chrome.offscreen.closeDocument().catch(() => {});
+  return false;
 });
 
 chrome.notifications.onClicked.addListener(id => {

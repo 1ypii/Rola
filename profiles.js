@@ -18,7 +18,7 @@
 `;
 
   const statusCss = `
-.rk-profile-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-family: var(--rk-font); font-size: 14px; font-weight: 600; line-height: 22px; }
+.rk-profile-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; font-family: var(--rk-font); font-size: 14px; font-weight: 600; line-height: 22px; }
 .rk-profile-state { display: inline-flex; align-items: center; gap: 5px; text-decoration: none !important; }
 a.rk-profile-state { transition: opacity var(--rk-fast) ease; }
 a.rk-profile-state:hover { opacity: 0.8; }
@@ -194,6 +194,12 @@ button.rk-profile-chip:active { transform: scale(0.97); }
       for (const item of (result && Array.isArray(result.data) ? result.data : [])) {
         if (item && Rk.isId(item.id)) details.set(Number(item.id), item);
       }
+      const missing = ids.filter(id => !details.has(id));
+      await Promise.all(missing.map(async id => {
+        const asset = await safe(Rk.api.get(`https://economy.roblox.com/v2/assets/${id}/details`, { cache: 600000 }));
+        if (!asset || typeof asset.Name !== 'string') return;
+        details.set(id, { id, name: asset.Name, price: asset.IsForSale && typeof asset.PriceInRobux === 'number' ? asset.PriceInRobux : null, priceStatus: asset.IsForSale ? null : 'Off Sale' });
+      }));
     }
     return { ids, details };
   });
@@ -257,6 +263,16 @@ button.rk-profile-chip:active { transform: scale(0.97); }
     });
     if (after) Rk.observe(after, anchor => anchor.after(section));
     return section;
+  };
+
+  const nativeCss = (key, selector) => `html:not(.rk-show-${key}) :is(${selector}) { display: none !important; }`;
+  const replacing = (key, run) => async ctx => {
+    let placed = null;
+    try {
+      placed = await run(ctx);
+    } finally {
+      if (!placed) document.documentElement.classList.add(`rk-show-${key}`);
+    }
   };
 
   const headerRow = (header, kind, order) => header.querySelector(`:scope > .rk-profile-${kind}`) || place(header, el('div', { class: `rk-profile-${kind} rk-inline` }), order);
@@ -346,10 +362,13 @@ button.rk-profile-chip:active { transform: scale(0.97); }
     id: 'profiles.infoCard',
     category: 'profiles',
     name: 'Account card',
-    description: 'Shows the user ID, username, display name, join date and account age on profiles.',
+    description: 'Shows the user ID, join date and account age under the profile buttons.',
     pages: PROFILE,
     css: `${copyableCss}
-.rk-profile-account-extra:not(:empty) { margin-top: 10px; font-size: 13px; }
+.rk-profile-account { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; width: 100%; }
+.rk-profile-account .rk-stats { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.rk-profile-account .rk-stat { padding: 0; background: transparent; }
+.rk-profile-account-extra:not(:empty) { font-size: 13px; }
 `,
     async run() {
       const id = profileId();
@@ -358,16 +377,16 @@ button.rk-profile-chip:active { transform: scale(0.97); }
       await meLoaded;
       const age = accountAge(user.created);
       const joined = toTime(user.created);
-      addSection('profile', ui.section('Account', [
+      const row = el('div', { class: 'rk-profile-account' },
         ui.stats([
           ['User ID', el('span', { class: 'rk-profile-copyable' }, String(id), ui.button('', { variant: 'ghost', icon: 'copy', title: 'Copy user ID', onClick: () => ui.copy(String(id), 'User ID copied') }))],
-          ['Username', `@${user.name}`],
-          ['Display name', el('span', { class: 'rk-profile-named' }, el('span', null, String(user.displayName || user.name)), mark(isVerified(id, user.hasVerifiedBadge), 16))],
           ['Joined', joined ? new Intl.DateTimeFormat(undefined, { dateStyle: 'long' }).format(joined) : '-', { title: fmt.dateTime(user.created) }],
           ['Account age', age ? (age.years ? `${fmt.num(age.years)}y ${fmt.num(age.days)}d` : fmt.plural(age.days, 'day')) : '-', age ? { title: `${fmt.plural(age.years, 'year')}, ${fmt.plural(age.days, 'day')}` } : undefined]
         ]),
+        user.isBanned === true ? ui.pill('Banned', 'danger') : null,
         el('div', { class: 'rk-profile-account-extra rk-inline' })
-      ], { className: 'rk-profile-account', actions: user.isBanned === true ? ui.pill('Banned', 'danger') : null }), 1);
+      );
+      Rk.observe('.user-profile-header', header => place(header, row, 4));
     }
   });
 
@@ -404,31 +423,13 @@ button.rk-profile-chip:active { transform: scale(0.97); }
   });
 
   Rk.feature({
-    id: 'profiles.socialCounts',
-    category: 'profiles',
-    name: 'Exact social counts',
-    description: 'Shows exact friend, follower and following counts.',
-    pages: PROFILE,
-    async run() {
-      const id = profileId();
-      if (!id) return;
-      const kinds = [['Friends', 'friends'], ['Followers', 'followers'], ['Following', 'followings']];
-      const counts = await Promise.all(kinds.map(([, path]) => safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/${path}/count`, { cache: 60000 }))));
-      const values = counts.map(json => (json && Number.isFinite(json.count) ? json.count : null));
-      if (values.every(value => value === null)) return;
-      const grid = statsGrid();
-      kinds.forEach(([label], index) => place(grid, ui.stat(label, fmt.num(values[index])), index + 1));
-    }
-  });
-
-  Rk.feature({
     id: 'profiles.mutualFriends',
     category: 'profiles',
     name: 'Mutual friends',
     description: 'Shows the friends you have in common with other users.',
     pages: PROFILE,
-    css: tilesCss,
-    async run() {
+    css: `${tilesCss}${nativeCss('friends', '.react-friends-carousel-container, .friends-carousel-0-friends')}`,
+    run: replacing('friends', async () => {
       const id = profileId();
       const me = await Rk.me();
       if (!id || !me || me.id === id) return;
@@ -443,8 +444,8 @@ button.rk-profile-chip:active { transform: scale(0.97); }
         const user = users && users.get(friendId);
         return tile(`/users/${friendId}/profile`, ui.thumb(Rk.thumb('AvatarHeadShot', friendId, '150x150'), { size: 64, round: true }), user ? String(user.displayName || user.name) : `User ${friendId}`, mark(isVerified(friendId, user && user.hasVerifiedBadge)));
       });
-      addSection('profile', ui.section('Mutual friends', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-mutuals', actions: ui.pill(fmt.num(shared.length)) }), 4, { replace: '.react-friends-carousel-container, .friends-carousel-0-friends' });
-    }
+      return addSection('profile', ui.section('Mutual friends', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-mutuals', actions: ui.pill(fmt.num(shared.length)) }), 4, { replace: '.react-friends-carousel-container, .friends-carousel-0-friends' });
+    })
   });
 
   Rk.feature({
@@ -700,15 +701,15 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     name: 'Recent badges',
     description: 'Shows the 10 badges the user earned most recently.',
     pages: PROFILE,
-    css: tilesCss,
-    async run() {
+    css: `${tilesCss}${nativeCss('badges', '.profile-carousel:has(a[href*="/inventory/#!/badges"])')}`,
+    run: replacing('badges', async () => {
       const id = profileId();
       const json = id ? await safe(Rk.api.get(`https://badges.roblox.com/v1/users/${id}/badges?limit=10&sortOrder=Desc`, { cache: 60000 })) : null;
       const badges = json && Array.isArray(json.data) ? json.data.filter(badge => badge && Rk.isId(badge.id)).slice(0, 10) : [];
       if (!badges.length) return;
       const tiles = badges.map(badge => tile(`/badges/${badge.id}`, ui.thumb(Rk.thumb('BadgeIcon', badge.id, '150x150'), { size: 64 }), typeof badge.name === 'string' && badge.name ? badge.name : 'Badge'));
-      addSection('profile', ui.section('Recent badges', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-badges' }), 9, { replace: '.profile-carousel:has(a[href*="/inventory/#!/badges"])' });
-    }
+      return addSection('profile', ui.section('Recent badges', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-badges' }), 9, { replace: '.profile-carousel:has(a[href*="/inventory/#!/badges"])' });
+    })
   });
 
   Rk.feature({
@@ -717,8 +718,10 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     name: 'Community list',
     description: 'Lists every community the user is in with role, rank and exact member count.',
     pages: PROFILE,
-    css: listCss,
-    async run() {
+    css: `${listCss}${nativeCss('communities', '.profile-communities')}
+.rk-profile-owner { font-weight: 600; color: var(--rk-text-strong); }
+`,
+    run: replacing('communities', async () => {
       const id = profileId();
       const groups = id ? await groupsOf(id) : null;
       if (!groups || !groups.length) return;
@@ -727,12 +730,12 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         `/communities/${group.id}`,
         group.name,
         `${group.role}, rank ${group.rank}`,
-        [group.rank === 255 ? ui.pill('Owner', 'accent') : null, Number.isFinite(group.members) ? el('span', { class: 'rk-muted' }, fmt.plural(group.members, 'member')) : null],
+        [group.rank === 255 ? el('span', { class: 'rk-profile-owner' }, 'Owner') : null, Number.isFinite(group.members) ? el('span', { class: 'rk-muted' }, fmt.plural(group.members, 'member')) : null],
         mark(group.verified)
       ));
       const [list, more] = collapsible(rows, 8);
-      addSection('profile', ui.section('Communities', list, { className: 'rk-profile-groups', actions: [ui.pill(fmt.num(groups.length)), more] }), 10, { replace: '.profile-communities' });
-    }
+      return addSection('profile', ui.section('Communities', list, { className: 'rk-profile-groups', actions: [ui.pill(fmt.num(groups.length)), more] }), 10, { replace: '.profile-communities' });
+    })
   });
 
   Rk.feature({
@@ -760,8 +763,8 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     name: 'Created experiences',
     description: 'Lists the public experiences the user made, with total visits.',
     pages: PROFILE,
-    css: listCss,
-    async run() {
+    css: `${listCss}${nativeCss('experiences', '.profile-experiences')}`,
+    run: replacing('experiences', async () => {
       const id = profileId();
       const list = id ? await safe(Rk.api.paged(`https://games.roblox.com/v2/users/${id}/games?accessFilter=Public&sortOrder=Desc`, { max: 100, limit: 50 })) : null;
       const games = Array.isArray(list) ? list.filter(game => game && Rk.isId(game.id) && game.rootPlace && Rk.isId(game.rootPlace.id)) : [];
@@ -775,8 +778,8 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         el('span', { class: 'rk-muted' }, fmt.plural(Number(game.placeVisits) || 0, 'visit'))
       ));
       const [rowsNode, more] = collapsible(rows, 8);
-      addSection('profile', ui.section('Experiences', rowsNode, { className: 'rk-profile-games', actions: [ui.pill(fmt.plural(total, 'visit')), more] }), 11, { replace: '.profile-experiences' });
-    }
+      return addSection('profile', ui.section('Experiences', rowsNode, { className: 'rk-profile-games', actions: [ui.pill(fmt.plural(total, 'visit')), more] }), 11, { replace: '.profile-experiences' });
+    })
   });
 
   Rk.feature({
@@ -822,19 +825,35 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     name: 'Currently wearing details',
     description: 'Lists the items the user is wearing in place of the Roblox list.',
     pages: PROFILE,
-    css: tilesCss,
-    async run() {
+    css: `${nativeCss('wearing', '.profile-currently-wearing')}
+.rk-profile-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px 12px; }
+.rk-profile-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--rk-text-strong) !important; text-decoration: none !important; }
+.rk-profile-item .rk-thumb { width: 100% !important; height: auto !important; aspect-ratio: 1; transition: opacity var(--rk-med) ease, transform var(--rk-fast) var(--rk-ease); }
+.rk-profile-item:hover .rk-thumb { transform: translateY(-2px); }
+.rk-profile-item-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; font-weight: 600; line-height: 18px; }
+.rk-profile-item-price { font-size: 14px; line-height: 18px; color: var(--rk-muted); }
+.rk-profile-item-price .rk-robux { font-weight: 600; }
+`,
+    run: replacing('wearing', async () => {
       const id = profileId();
-      if (!id) return;
+      if (!id) return null;
       const worn = await wornItems(id);
-      if (!worn || !worn.ids.length) return;
-      const tiles = worn.ids.map(assetId => {
+      if (!worn || !worn.ids.length) return null;
+      const cards = worn.ids.map(assetId => {
         const item = worn.details.get(assetId);
         const name = item && typeof item.name === 'string' && item.name ? item.name : `Item ${assetId}`;
-        return tile(`/catalog/${assetId}`, ui.thumb(Rk.thumb('Asset', assetId, '150x150'), { size: 64 }), name);
+        const amount = item && typeof item.lowestPrice === 'number' && item.priceStatus !== 'Off Sale' && typeof item.price !== 'number' ? item.lowestPrice : item ? item.price : null;
+        let price = 'Off Sale';
+        if (typeof amount === 'number' && amount > 0) price = ui.robux(amount);
+        else if (amount === 0) price = 'Free';
+        return el('a', { class: 'rk-profile-item', href: `/catalog/${assetId}`, title: name },
+          ui.thumb(Rk.thumb('Asset', assetId, '150x150'), { size: 150, alt: name }),
+          el('span', { class: 'rk-profile-item-name' }, name),
+          el('span', { class: 'rk-profile-item-price' }, price)
+        );
       });
-      addSection('profile', ui.section('Currently wearing', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-wearing', actions: ui.pill(fmt.num(worn.ids.length)) }), 7, { replace: '.profile-currently-wearing' });
-    }
+      return addSection('profile', ui.section('Currently wearing', el('div', { class: 'rk-profile-items' }, cards), { className: 'rk-profile-wearing', actions: ui.pill(fmt.num(worn.ids.length)) }), 7, { replace: '.profile-currently-wearing' });
+    })
   });
 
   Rk.feature({
@@ -1125,6 +1144,65 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
       const names = new Set([display, me.name].filter(Boolean));
       Rk.observe('#header :is(span, div, a, p), .left-nav :is(span, div, a, p)', node => {
         if (!node.firstElementChild && names.has(node.textContent.trim()) && !node.closest('.rk-nav-item, .rk-menu, .rk-modal, .rk-section')) add(node);
+      });
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.fakeName',
+    category: 'profiles',
+    name: 'Custom name on you',
+    description: 'Swaps your display name and username for your own text. Only you can see it, nothing on your account changes.',
+    default: false,
+    options: [
+      { key: 'displayName', label: 'Display name', type: 'text', maxLength: 50, placeholder: 'Your display name', default: '' },
+      { key: 'username', label: 'Username', type: 'text', maxLength: 50, placeholder: 'Your username', default: '' }
+    ],
+    async run(ctx) {
+      const me = await Rk.me();
+      if (!me || !me.name) return;
+      const swaps = () => {
+        const map = new Map();
+        const display = ctx.option('displayName').trim();
+        const username = ctx.option('username').trim().replace(/^@/, '');
+        if (username) {
+          map.set(me.name, username);
+          map.set(`@${me.name}`, `@${username}`);
+        }
+        if (display && me.displayName) map.set(me.displayName, display);
+        return map;
+      };
+      let applied = swaps();
+      let current = applied;
+      const swapText = text => {
+        if (!current.size || text.parentElement === null) return;
+        if (text.parentElement.closest('script, style, textarea, input, [contenteditable], .rk-modal, .rk-settings')) return;
+        const raw = text.nodeValue;
+        const next = current.get(raw.trim());
+        if (next === undefined) return;
+        text.nodeValue = raw.replace(raw.trim(), next);
+      };
+      const swapIn = root => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let text = walker.nextNode(); text; text = walker.nextNode()) swapText(text);
+      };
+      new MutationObserver(records => {
+        for (const record of records) {
+          if (record.type === 'characterData') swapText(record.target);
+          else for (const node of record.addedNodes) {
+            if (node.nodeType === 3) swapText(node);
+            else if (node.nodeType === 1) swapIn(node);
+          }
+        }
+      }).observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+      Rk.domReady.then(() => swapIn(document.body));
+      Rk.onSettings(() => {
+        const next = Rk.isEnabled(ctx.id) ? swaps() : new Map();
+        if ([...next].join() === [...applied].join()) return;
+        current = new Map(next);
+        for (const [key, value] of applied) current.set(value, next.has(key) ? next.get(key) : key);
+        applied = next;
+        swapIn(document.body);
       });
     }
   });
