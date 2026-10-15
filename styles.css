@@ -15,7 +15,7 @@
   --rk-accent-hover: #2a50e0;
   --rk-accent-text: #ffffff;
   --rk-accent-soft: rgba(51, 95, 255, 0.12);
-  --rk-verified: #335fff;
+  --rk-verified: #0066ff;
   --rk-success: #1e9e5b;
   --rk-success-soft: rgba(30, 158, 91, 0.14);
   --rk-warning: #c27c00;
@@ -506,6 +506,7 @@
 .rk-verified {
   display: inline-block;
   flex: none;
+  overflow: hidden;
   margin-left: 4px;
   vertical-align: -0.15em;
 }
@@ -515,11 +516,7 @@
 }
 
 .rk-verified-check {
-  fill: none;
-  stroke: #ffffff;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  fill: #ffffff;
 }
 
 .rk-toasts {

@@ -1082,21 +1082,20 @@ const Rk = (() => {
 
   const verified = ({ size = 16, title = 'Verified' } = {}) => {
     const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('viewBox', '0 0 28 28');
     svg.setAttribute('width', String(size));
     svg.setAttribute('height', String(size));
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', title);
     svg.classList.add('rk-verified');
     const back = document.createElementNS(SVG_NS, 'rect');
-    for (const [key, value] of Object.entries({ x: 4, y: 4, width: 16, height: 16, rx: 4.5 })) back.setAttribute(key, String(value));
+    for (const [key, value] of Object.entries({ x: 5.88818, width: 22.89, height: 22.89, transform: 'rotate(15 5.88818 0)' })) back.setAttribute(key, String(value));
     back.setAttribute('class', 'rk-verified-shape');
-    const turned = back.cloneNode();
-    turned.setAttribute('transform', 'rotate(45 12 12)');
     const check = document.createElementNS(SVG_NS, 'path');
-    check.setAttribute('d', 'M8.2 12.3l2.6 2.6 5-5.4');
+    check.setAttribute('fill-rule', 'evenodd');
+    check.setAttribute('d', 'M20.543 8.7508L20.549 8.7568C21.15 9.3578 21.15 10.3318 20.549 10.9328L11.817 19.6648L7.45 15.2968C6.85 14.6958 6.85 13.7218 7.45 13.1218L7.457 13.1148C8.058 12.5138 9.031 12.5138 9.633 13.1148L11.817 15.2998L18.367 8.7508C18.968 8.1498 19.942 8.1498 20.543 8.7508Z');
     check.setAttribute('class', 'rk-verified-check');
-    svg.append(back, turned, check);
+    svg.append(back, check);
     return svg;
   };
 
