@@ -1106,7 +1106,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     id: 'profiles.fakeVerified',
     category: 'profiles',
     name: 'Verified badge on you',
-    description: 'Shows a verified badge next to your own name. Only you can see it.',
+    description: 'Shows a verified badge next to your name on your profile. Only you can see it.',
     default: false,
     async run() {
       const me = await Rk.me();
@@ -1154,18 +1154,6 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
           });
         });
       }
-      const navBadge = () => {
-        const badge = ui.verified();
-        badge.style.cssText = 'width: var(--icon-size-small, 16px); height: var(--icon-size-small, 16px); margin: 0;';
-        return badge;
-      };
-      Rk.observe('.age-bracket-label-username', name => {
-        if (name.hasAttribute('data-rk-self-verified') || name.parentElement.querySelector('.verified-badge-icon-header, [class*="verified-badge-icon" i]')) return;
-        name.setAttribute('data-rk-self-verified', '');
-        const badge = navBadge();
-        badge.classList.add('verified-badge-icon-header');
-        name.after(el('section', null, badge));
-      });
     }
   });
 
