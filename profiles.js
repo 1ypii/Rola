@@ -255,9 +255,10 @@ button.rk-profile-chip:active { transform: scale(0.97); }
 
   const headerRow = (header, kind, order) => header.querySelector(`:scope > .rk-profile-${kind}`) || place(header, el('div', { class: `rk-profile-${kind} rk-inline` }), order);
   const addPill = (node, order) => Rk.observe('.user-profile-header', header => place(headerRow(header, 'pills', 1), node, order));
-  const addStatus = (node, order) => Rk.observe('.user-profile-header .profile-header-username', name => {
-    const row = name.parentElement.querySelector(':scope > .rk-profile-status') || el('div', { class: 'rk-profile-status' });
-    if (row.previousElementSibling !== name) name.after(row);
+  const addStatus = (node, order) => Rk.observe('.user-profile-header .stylistic-alts-username', name => {
+    const line = name.parentElement;
+    const row = line.parentElement.querySelector(':scope > .rk-profile-status') || el('div', { class: 'rk-profile-status' });
+    if (row.previousElementSibling !== line) line.after(row);
     place(row, node, order);
   });
   const addTool =(node, order) => Rk.observe('.user-profile-header', header => place(headerRow(header, 'toolbar', 3), node, order));
