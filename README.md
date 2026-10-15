@@ -1,21 +1,19 @@
 # Rola
 
-Rola is a browser extension that adds features to the Roblox website, styled to match it in both light and dark theme. Everything shows up inside the normal Roblox pages, and every feature can be turned on or off from the Rola settings panel.
+Rola is a browser extension that adds 301 optional features to the Roblox website, styled to match it in both light and dark theme. Everything shows up inside the normal Roblox pages, and every feature can be turned on or off from the Rola settings panel.
 
-Rola is not made by roblox. and isnt connected to it either.
+Rola is not made by or affiliated with Roblox.
 
 ## Install
 
-**Chrome Web Store** Use the store link in this repository's About section. Store installs update automatically.
+Works in Chrome, Edge, Brave and other Chromium browsers.
 
-**Load it yourself** (Chrome, Edge, Brave and other Chromium browsers):
-
-1. Download this repository as a zip and extract it, or clone it.
+1. On this page click **Code**, then **Download ZIP**, and extract it.
 2. Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
 3. Turn on **Developer mode** in the top right.
-4. Click **Load unpacked** and pick the extracted folder, the one that contains `manifest.json`.
+4. Click **Load unpacked** and pick the extracted `Rola-main` folder, the one that contains `manifest.json`.
 
-To update a manual install, replace the files and click the reload button on Rola in the extensions page.
+To update, download the zip again, replace the files in that folder and click the reload button on Rola in the extensions page. Your settings stay.
 
 ## Using it
 
@@ -88,22 +86,11 @@ page.js              runs in the page to start the Roblox client
 core.js              shared runtime: settings, page watching, Roblox API helpers, UI kit
 settings.js          the settings panel and header button
 styles.css           shared styles for light and dark theme
-features/*.js        the features, one file per category
-icons/               extension icons
-.github/workflows/   publishes each push to the Chrome Web Store
+site.js ... tools.js the features, one file per category
+icon*.png            extension icons
 ```
 
 Each feature is registered with `Rk.feature({ id, category, name, description, default, pages, options, css, run })`. Features only use the core helpers and the `--rk-*` CSS variables, so they follow the Roblox theme.
-
-## Publishing
-
-Every push to `main` builds a zip, gives it a new version number and submits it to the Chrome Web Store through `.github/workflows/publish.yml`. It needs three repository secrets:
-
-- `CWS_SERVICE_ACCOUNT`: the JSON key of a Google Cloud service account that has been added to the Chrome Web Store publisher
-- `CWS_PUBLISHER_ID`
-- `CWS_EXTENSION_ID`
-
-Forks do not have these secrets, so the workflow only publishes from this repository.
 
 ## License
 
