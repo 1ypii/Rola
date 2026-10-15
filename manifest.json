@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "Rola",
+  "version": "1.0.0",
+  "description": "A large set of quality of life features for the Roblox website, styled to match it.",
+  "minimum_chrome_version": "111",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Rola settings",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://*.roblox.com/*",
+    "https://api.rolimons.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.roblox.com/*"],
+      "exclude_matches": ["https://www.roblox.com/userads/*", "https://www.roblox.com/user-sponsorship/*"],
+      "js": ["page.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.roblox.com/*"],
+      "exclude_matches": ["https://www.roblox.com/userads/*", "https://www.roblox.com/user-sponsorship/*"],
+      "css": ["styles.css"],
+      "js": [
+        "core.js",
+        "features/site.js",
+        "features/games.js",
+        "features/servers.js",
+        "features/profiles.js",
+        "features/avatar.js",
+        "features/trading.js",
+        "features/discovery.js",
+        "features/tools.js",
+        "settings.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}
