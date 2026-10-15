@@ -1112,7 +1112,9 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
       const me = await Rk.me();
       const display = me ? String(me.displayName || me.name).trim() : '';
       if (!display) return;
-      const handle = `@${me.name}`;
+      const custom = key => (Rk.isEnabled('profiles.fakeName') ? String(Rk.option('profiles.fakeName', key) || '').trim().replace(/^@/, '') : '');
+      const displays = [display, custom('displayName')].filter(Boolean);
+      const usernames = [me.name, custom('username')].filter(Boolean);
       const tags = 'h1, h2, h3, h4, span, div, p, a';
       const add = node => {
         if (node.hasAttribute('data-rk-self-verified')) return;
@@ -1135,13 +1137,13 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
             queued = false;
             for (const header of document.querySelectorAll('.user-profile-header')) {
               if (header.querySelector('[data-rk-self-verified]')) continue;
-              const target = nameIn(header, display) || nameIn(header, handle);
+              const target = displays.map(text => nameIn(header, text)).find(Boolean) || usernames.map(name => nameIn(header, `@${name}`)).find(Boolean);
               if (target) add(target);
             }
           });
         });
       }
-      const names = new Set([display, me.name].filter(Boolean));
+      const names = new Set([...displays, ...usernames]);
       Rk.observe('#header :is(span, div, a, p), .left-nav :is(span, div, a, p)', node => {
         if (!node.firstElementChild && names.has(node.textContent.trim()) && !node.closest('.rk-nav-item, .rk-menu, .rk-modal, .rk-section')) add(node);
       });
