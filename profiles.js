@@ -1363,16 +1363,20 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
 .rk-friends-game .rk-btn.rk-btn-sm { height: 22px; padding: 0 8px; font-size: 12px; }
 `,
     run() {
-      onCardBatch(async cards => {
+      const sync = async () => {
+        const cards = friendCards();
         const map = await presenceOf(cards.map(userIdNear));
         for (const card of cards) {
           const userId = userIdNear(card);
           const entry = userId ? map.get(userId) : null;
-          if (presenceType(entry) !== 2 || card.querySelector('.rk-friends-game')) continue;
-          if (!Rk.isId(entry.rootPlaceId) && !Rk.isId(entry.placeId)) continue;
+          const joinable = presenceType(entry) === 2 && (Rk.isId(entry.rootPlaceId) || Rk.isId(entry.placeId));
+          const current = card.querySelector('.rk-friends-game');
+          if (current && joinable && current.dataset.userId === String(userId)) continue;
+          if (current) current.remove();
+          if (!joinable) continue;
           const target = card.querySelector('.avatar-card-container') || card;
           target.classList.add('rk-friends-joinable');
-          target.append(el('div', { class: 'rk-friends-game' },
+          target.append(el('div', { class: 'rk-friends-game', dataset: { userId: String(userId) } },
             ui.button('Join', { variant: 'primary', icon: 'play', onClick: event => {
               event.preventDefault();
               event.stopPropagation();
@@ -1380,6 +1384,24 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
             } })
           ));
         }
+      };
+      let queued = false;
+      const schedule = () => {
+        if (queued) return;
+        queued = true;
+        queueMicrotask(() => {
+          queued = false;
+          sync();
+        });
+      };
+      const watched = new WeakSet();
+      Rk.observe(CARD, card => {
+        const list = card.closest('ul, ol') || card.parentElement;
+        if (list && !watched.has(list)) {
+          watched.add(list);
+          new MutationObserver(schedule).observe(list, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['href'] });
+        }
+        schedule();
       });
     }
   });
