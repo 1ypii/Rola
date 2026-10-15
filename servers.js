@@ -327,13 +327,16 @@ ${names.map(name => `:is(.rk-servers-browser, .rk-servers-friends) .rk-servers-o
     id: 'servers.browser',
     category: 'servers',
     name: 'Server browser',
-    description: 'Adds a sortable, filterable server list with quick join to the servers tab.',
+    description: "Replaces Roblox's server list with a sortable, filterable one with quick join.",
     pages: ['game'],
     options: [
       { key: 'pages', label: 'Pages to load', type: 'number', min: 1, max: 20, step: 1, default: 3 },
       { key: 'sort', label: 'Default sort', type: 'select', choices: SORTS, default: 'players_desc' }
     ],
     css: `${ROW_CSS}
+body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
+  display: none !important;
+}
 .rk-servers-browser {
   scroll-margin-top: 72px;
 }
@@ -1306,9 +1309,12 @@ ${names.map(name => `:is(.rk-servers-browser, .rk-servers-friends) .rk-servers-o
     id: 'servers.friendServers',
     category: 'servers',
     name: "Friends' servers",
-    description: 'Shows the servers your friends are playing in with a join button.',
+    description: "Shows the servers your friends are playing in with a join button, in place of Roblox's list.",
     pages: ['game'],
     css: `${ROW_CSS}
+#rbx-friends-running-games {
+  display: none !important;
+}
 .rk-servers-friends .rk-servers-opt {
   display: none;
 }
@@ -1393,19 +1399,6 @@ ${names.map(name => `:is(.rk-servers-browser, .rk-servers-friends) .rk-servers-o
       await Rk.waitFor(ANCHORS.join(', '));
       await load();
     }
-  });
-
-  Rk.feature({
-    id: 'servers.hideNativeList',
-    category: 'servers',
-    name: 'Hide Roblox server list',
-    description: "Hides Roblox's own public server list while the server browser is shown.",
-    default: false,
-    pages: ['game'],
-    css: `
-body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
-  display: none !important;
-}`
   });
 
   Rk.feature({
