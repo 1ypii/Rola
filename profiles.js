@@ -1137,6 +1137,17 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
             queued = false;
             for (const header of document.querySelectorAll('.user-profile-header')) {
               if (header.querySelector('[data-rk-self-verified]')) continue;
+              const title = header.querySelector('#profile-header-title-container-name');
+              if (title && displays.includes(title.textContent.trim())) {
+                if (title.parentElement.querySelector('[class*="verified" i]')) continue;
+                const badge = ui.verified();
+                badge.style.cssText = 'width: var(--icon-size-large, 24px); height: var(--icon-size-large, 24px); margin: 0;';
+                const group = title.nextElementSibling && title.nextElementSibling.classList.contains('shrink-0') ? title.nextElementSibling : null;
+                title.setAttribute('data-rk-self-verified', '');
+                if (group) group.prepend(badge);
+                else title.after(el('span', { class: 'items-center gap-xxsmall inline-flex shrink-0' }, badge));
+                continue;
+              }
               const target = displays.map(text => nameIn(header, text)).find(Boolean) || usernames.map(name => nameIn(header, `@${name}`)).find(Boolean);
               if (target) add(target);
             }
