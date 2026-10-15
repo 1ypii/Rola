@@ -1,6 +1,5 @@
 (() => {
   const { el, ui, icon } = Rk;
-  const version = chrome.runtime.getManifest().version;
 
   let panel = null;
   let activeCategory = Rk.categories[0].id;
@@ -219,10 +218,12 @@
       el('span', null, 'Some changes finish applying after a reload'),
       ui.button('Reload page', { variant: 'primary', onClick: () => location.reload() })
     );
+    const reset = ui.button('Reset', { variant: 'ghost', onClick: resetAll });
+    reset.classList.add('rk-settings-reset');
     const foot = el('div', { class: 'rk-settings-foot' },
       ui.button('Export', { variant: 'ghost', icon: 'download', onClick: exportFile }),
       ui.button('Import', { variant: 'ghost', icon: 'plus', onClick: importFile }),
-      ui.button('Reset', { variant: 'danger', onClick: resetAll }),
+      reset,
       ui.button('Done', { variant: 'primary', size: 'md', onClick: close })
     );
     const main = el('section', { class: 'rk-settings-main' },
@@ -235,7 +236,7 @@
     );
     const dialog = el('div', { class: 'rk-settings', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Rola settings', tabindex: '-1' },
       el('aside', { class: 'rk-settings-side' },
-        el('div', { class: 'rk-settings-brand' }, el('span', { class: 'rk-settings-brand-name' }, 'Rola'), el('span', { class: 'rk-settings-brand-version' }, `v${version}`)),
+        el('div', { class: 'rk-settings-brand' }, el('span', { class: 'rk-settings-brand-name' }, 'Rola')),
         el('div', { class: 'rk-settings-search' }, icon('search', 16), search),
         nav,
         el('div', { class: 'rk-settings-side-footer' }, total)

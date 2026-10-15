@@ -851,9 +851,14 @@
   color: var(--rk-text-strong);
 }
 
-.rk-settings-brand-version {
-  font-size: 12px;
-  color: var(--rk-muted);
+.rk-btn.rk-settings-reset,
+.rk-btn.rk-settings-reset:hover {
+  background: transparent;
+  color: var(--rk-danger) !important;
+}
+
+.rk-btn.rk-settings-reset:hover {
+  opacity: 0.8;
 }
 
 .rk-settings-search {
