@@ -1355,12 +1355,12 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     id: 'profiles.friendsJoin',
     category: 'profiles',
     name: 'Join from friends list',
-    description: 'Shows what friends are playing on their cards, with a join button.',
+    description: 'Adds a join button to the cards of friends who are in a game.',
     pages: FRIENDS,
     css: `
-.rk-friends-game { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 4px; font-family: var(--rk-font); font-size: 12px; color: var(--rk-muted); }
-.rk-friends-game-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.rk-friends-game .rk-btn.rk-btn-sm { flex: none; height: 22px; padding: 0 8px; font-size: 12px; }
+.rk-friends-joinable { position: relative; }
+.rk-friends-game { position: absolute; right: 10px; bottom: 10px; z-index: 1; }
+.rk-friends-game .rk-btn.rk-btn-sm { height: 22px; padding: 0 8px; font-size: 12px; }
 `,
     run() {
       onCardBatch(async cards => {
@@ -1369,16 +1369,15 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
           const userId = userIdNear(card);
           const entry = userId ? map.get(userId) : null;
           if (presenceType(entry) !== 2 || card.querySelector('.rk-friends-game')) continue;
-          const game = typeof entry.lastLocation === 'string' && entry.lastLocation.trim() ? entry.lastLocation.trim() : 'In game';
-          const name = card.querySelector('.avatar-name');
-          const target = card.querySelector('.avatar-card-caption') || (name && name.parentElement) || card;
+          if (!Rk.isId(entry.rootPlaceId) && !Rk.isId(entry.placeId)) continue;
+          const target = card.querySelector('.avatar-card-container') || card;
+          target.classList.add('rk-friends-joinable');
           target.append(el('div', { class: 'rk-friends-game' },
-            el('span', { class: 'rk-friends-game-name', title: game }, game),
-            Rk.isId(entry.rootPlaceId) || Rk.isId(entry.placeId) ? ui.button('Join', { variant: 'primary', icon: 'play', onClick: event => {
+            ui.button('Join', { variant: 'primary', icon: 'play', onClick: event => {
               event.preventDefault();
               event.stopPropagation();
               Rk.launch.follow(userId);
-            } }) : null
+            } })
           ));
         }
       });
