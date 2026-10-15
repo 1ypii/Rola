@@ -5,16 +5,16 @@
   "description": "A large set of quality of life features for the Roblox website, styled to match it.",
   "minimum_chrome_version": "111",
   "icons": {
-    "16": "icons/icon16.png",
-    "32": "icons/icon32.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
   },
   "action": {
     "default_title": "Rola settings",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "32": "icons/icon32.png"
+      "16": "icon16.png",
+      "32": "icon32.png"
     }
   },
   "background": {
@@ -44,14 +44,14 @@
       "css": ["styles.css"],
       "js": [
         "core.js",
-        "features/site.js",
-        "features/games.js",
-        "features/servers.js",
-        "features/profiles.js",
-        "features/avatar.js",
-        "features/trading.js",
-        "features/discovery.js",
-        "features/tools.js",
+        "site.js",
+        "games.js",
+        "servers.js",
+        "profiles.js",
+        "avatar.js",
+        "trading.js",
+        "discovery.js",
+        "tools.js",
         "settings.js"
       ],
       "run_at": "document_start"
