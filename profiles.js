@@ -235,7 +235,7 @@ button.rk-profile-chip:active { transform: scale(0.97); }
   const presenceType = entry => (entry ? Number(entry.userPresenceType) || 0 : 0);
 
   const hosts = new Map();
-  const addSection = (kind, section, order) => {
+  const addSection = (kind, section, order, { replace, after } = {}) => {
     if (!hosts.has(kind)) {
       const host = el('div', { class: `rk-${kind}-sections` });
       hosts.set(kind, host);
@@ -250,7 +250,13 @@ button.rk-profile-chip:active { transform: scale(0.97); }
         Rk.mount('#content', host, { position: 'append' });
       }
     }
-    return place(hosts.get(kind), section, order);
+    place(hosts.get(kind), section, order);
+    if (replace) Rk.observe(replace, native => {
+      native.classList.add('rk-replaced');
+      native.before(section);
+    });
+    if (after) Rk.observe(after, anchor => anchor.after(section));
+    return section;
   };
 
   const headerRow = (header, kind, order) => header.querySelector(`:scope > .rk-profile-${kind}`) || place(header, el('div', { class: `rk-profile-${kind} rk-inline` }), order);
@@ -261,11 +267,11 @@ button.rk-profile-chip:active { transform: scale(0.97); }
     if (row.previousElementSibling !== line) line.after(row);
     place(row, node, order);
   });
-  const addTool =(node, order) => Rk.observe('.user-profile-header', header => place(headerRow(header, 'toolbar', 3), node, order));
+  const addTool = (node, order) => Rk.observe('.user-profile-header', header => place(headerRow(header, 'toolbar', 3), node, order));
 
   let statsSection = null;
   const statsGrid = () => {
-    if (!statsSection || !statsSection.parentElement) statsSection = addSection('profile', ui.section('Stats', ui.stats([]), { className: 'rk-profile-stats' }), 2);
+    if (!statsSection || !statsSection.parentElement) statsSection = addSection('profile', ui.section('Stats', ui.stats([]), { className: 'rk-profile-stats' }), 2, { after: ':is(.profile-tabs + .profile-tab-content, .profile-content) > :first-child:not(.rk-section)' });
     return statsSection.querySelector('.rk-stats');
   };
 
@@ -437,7 +443,7 @@ button.rk-profile-chip:active { transform: scale(0.97); }
         const user = users && users.get(friendId);
         return tile(`/users/${friendId}/profile`, ui.thumb(Rk.thumb('AvatarHeadShot', friendId, '150x150'), { size: 64, round: true }), user ? String(user.displayName || user.name) : `User ${friendId}`, mark(isVerified(friendId, user && user.hasVerifiedBadge)));
       });
-      addSection('profile', ui.section('Mutual friends', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-mutuals', actions: ui.pill(fmt.num(shared.length)) }), 4);
+      addSection('profile', ui.section('Mutual friends', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-mutuals', actions: ui.pill(fmt.num(shared.length)) }), 4, { replace: '.react-friends-carousel-container, .friends-carousel-0-friends' });
     }
   });
 
@@ -605,14 +611,31 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
   Rk.feature({
     id: 'profiles.premium',
     category: 'profiles',
-    name: 'Premium pill',
-    description: 'Marks users who have Premium.',
+    name: 'Premium status',
+    description: 'Shows whether the user has Premium.',
     pages: PROFILE,
-    css: headerCss,
+    css: `${statusCss}
+.rk-profile-state-premium { color: var(--rk-text-strong); }
+`,
     async run() {
       const id = profileId();
       const result = id ? await safe(Rk.api.get(`https://premiumfeatures.roblox.com/v1/users/${id}/validate-membership`, { cache: 60000 })) : null;
-      if (result === true || result === 'true') addPill(ui.pill('Premium', 'accent'), 3);
+      if (result === null || result === undefined) return;
+      const premium = result === true || result === 'true';
+      const logo = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      logo.setAttribute('viewBox', '0 0 32 32');
+      logo.setAttribute('width', '16');
+      logo.setAttribute('height', '16');
+      logo.setAttribute('aria-hidden', 'true');
+      for (const d of [
+        'M23 4C25.7614 4 28 6.23858 28 9V23C28 25.7614 25.7614 28 23 28H15C14.4477 28 14 27.5523 14 27C14 26.4477 14.4477 26 15 26H23C24.6569 26 26 24.6569 26 23V9C26 7.34315 24.6569 6 23 6H9C7.34315 6 6 7.34315 6 9V27C6 27.5523 5.55228 28 5 28C4.44772 28 4 27.5523 4 27V9C4 6.23858 6.23858 4 9 4H23Z',
+        'M20 10C21.1046 10 22 10.8954 22 12V20C22 21.1046 21.1046 22 20 22H15C14.4477 22 14 21.5523 14 21C14 20.4477 14.4477 20 15 20H20V12H12V27C12 27.5523 11.5523 28 11 28C10.4477 28 10 27.5523 10 27V12C10 10.8954 10.8954 10 12 10H20Z'
+      ]) {
+        const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        shape.setAttribute('d', d);
+        logo.append(shape);
+      }
+      addStatus(el('span', { class: 'rk-profile-state rk-profile-state-premium', title: 'Premium' }, logo, premium ? 'True' : 'False'), 3);
     }
   });
 
@@ -684,7 +707,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
       const badges = json && Array.isArray(json.data) ? json.data.filter(badge => badge && Rk.isId(badge.id)).slice(0, 10) : [];
       if (!badges.length) return;
       const tiles = badges.map(badge => tile(`/badges/${badge.id}`, ui.thumb(Rk.thumb('BadgeIcon', badge.id, '150x150'), { size: 64 }), typeof badge.name === 'string' && badge.name ? badge.name : 'Badge'));
-      addSection('profile', ui.section('Recent badges', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-badges' }), 9);
+      addSection('profile', ui.section('Recent badges', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-badges' }), 9, { replace: '.profile-carousel:has(a[href*="/inventory/#!/badges"])' });
     }
   });
 
@@ -708,7 +731,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         mark(group.verified)
       ));
       const [list, more] = collapsible(rows, 8);
-      addSection('profile', ui.section('Communities', list, { className: 'rk-profile-groups', actions: [ui.pill(fmt.num(groups.length)), more] }), 10);
+      addSection('profile', ui.section('Communities', list, { className: 'rk-profile-groups', actions: [ui.pill(fmt.num(groups.length)), more] }), 10, { replace: '.profile-communities' });
     }
   });
 
@@ -752,7 +775,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         el('span', { class: 'rk-muted' }, fmt.plural(Number(game.placeVisits) || 0, 'visit'))
       ));
       const [rowsNode, more] = collapsible(rows, 8);
-      addSection('profile', ui.section('Experiences', rowsNode, { className: 'rk-profile-games', actions: [ui.pill(fmt.plural(total, 'visit')), more] }), 11);
+      addSection('profile', ui.section('Experiences', rowsNode, { className: 'rk-profile-games', actions: [ui.pill(fmt.plural(total, 'visit')), more] }), 11, { replace: '.profile-experiences' });
     }
   });
 
@@ -797,26 +820,20 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     id: 'profiles.wearing',
     category: 'profiles',
     name: 'Currently wearing details',
-    description: 'Lists the items the user is wearing when the profile does not already show them.',
+    description: 'Lists the items the user is wearing in place of the Roblox list.',
     pages: PROFILE,
     css: tilesCss,
     async run() {
       const id = profileId();
       if (!id) return;
-      let section = null;
-      let native = false;
-      onNativeWearing(() => {
-        native = true;
-        if (section) section.remove();
-      });
       const worn = await wornItems(id);
-      if (native || !worn || !worn.ids.length) return;
+      if (!worn || !worn.ids.length) return;
       const tiles = worn.ids.map(assetId => {
         const item = worn.details.get(assetId);
         const name = item && typeof item.name === 'string' && item.name ? item.name : `Item ${assetId}`;
         return tile(`/catalog/${assetId}`, ui.thumb(Rk.thumb('Asset', assetId, '150x150'), { size: 64 }), name);
       });
-      section = addSection('profile', ui.section('Currently wearing', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-wearing', actions: ui.pill(fmt.num(worn.ids.length)) }), 7);
+      addSection('profile', ui.section('Currently wearing', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-wearing', actions: ui.pill(fmt.num(worn.ids.length)) }), 7, { replace: '.profile-currently-wearing' });
     }
   });
 
@@ -845,7 +862,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         prices.length ? ui.robux(total) : null,
         offSale ? el('span', null, `${fmt.num(offSale)} off sale`) : null
       );
-      onNativeWearing(heading => {
+      if (!Rk.isEnabled('profiles.wearing')) onNativeWearing(heading => {
         node.remove();
         const texts = [...heading.childNodes].filter(child => child.nodeType === 3 && child.nodeValue.trim());
         if (texts.length) texts[texts.length - 1].after(line);

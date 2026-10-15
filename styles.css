@@ -787,7 +787,8 @@
   gap: 8px;
 }
 
-.rk-hidden {
+.rk-hidden,
+.rk-replaced {
   display: none !important;
 }
 
