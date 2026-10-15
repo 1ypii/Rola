@@ -1,12 +1,12 @@
 # Rola
 
-Rola is a browser extension that adds 301 optional features to the Roblox website, styled to match it in both light and dark theme. Everything shows up inside the normal Roblox pages, and every feature can be turned on or off from the Rola settings panel.
+Rola is a browser extension that adds features to the Roblox website, styled to match it in both light and dark theme. Everything shows up inside the normal Roblox pages, and every feature can be turned on or off from the Rola settings panel.
 
-Rola is not made by or affiliated with Roblox.
+Rola is not made by roblox. and isnt connected to it either.
 
 ## Install
 
-**Chrome Web Store (recommended).** Use the store link in this repository's About section. Store installs update automatically.
+**Chrome Web Store** Use the store link in this repository's About section. Store installs update automatically.
 
 **Load it yourself** (Chrome, Edge, Brave and other Chromium browsers):
 
