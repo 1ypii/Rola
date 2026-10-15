@@ -17,6 +17,21 @@
 .rk-profile-pill-link:hover { opacity: 0.8; }
 `;
 
+  const statusCss = `
+.rk-profile-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-family: var(--rk-font); font-size: 14px; font-weight: 600; line-height: 22px; }
+.rk-profile-state { display: inline-flex; align-items: center; gap: 5px; text-decoration: none !important; }
+a.rk-profile-state { transition: opacity var(--rk-fast) ease; }
+a.rk-profile-state:hover { opacity: 0.8; }
+.rk-profile-state-online { color: var(--rk-accent); }
+.dark-theme .rk-profile-state-online { color: #9db8ff; }
+.rk-profile-state-offline { color: var(--rk-muted); }
+.rk-profile-state-game, .rk-profile-state-public { color: var(--rk-success); }
+.rk-profile-state-studio { color: var(--rk-warning); }
+.rk-profile-state-private { color: var(--rk-danger); }
+.rk-profile-state svg { flex: none; fill: currentColor; }
+.rk-profile-status .rk-btn.rk-btn-sm { height: 22px; padding: 0 8px; font-size: 12px; }
+`;
+
   const copyableCss = `
 .rk-profile-copyable { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; }
 .rk-profile-copyable .rk-btn.rk-btn-icon { width: 24px; height: 24px; }
@@ -240,7 +255,12 @@ button.rk-profile-chip:active { transform: scale(0.97); }
 
   const headerRow = (header, kind, order) => header.querySelector(`:scope > .rk-profile-${kind}`) || place(header, el('div', { class: `rk-profile-${kind} rk-inline` }), order);
   const addPill = (node, order) => Rk.observe('.user-profile-header', header => place(headerRow(header, 'pills', 1), node, order));
-  const addTool = (node, order) => Rk.observe('.user-profile-header', header => place(headerRow(header, 'toolbar', 3), node, order));
+  const addStatus = (node, order) => Rk.observe('.user-profile-header .profile-header-username', name => {
+    const row = name.parentElement.querySelector(':scope > .rk-profile-status') || el('div', { class: 'rk-profile-status' });
+    if (row.previousElementSibling !== name) name.after(row);
+    place(row, node, order);
+  });
+  const addTool =(node, order) => Rk.observe('.user-profile-header', header => place(headerRow(header, 'toolbar', 3), node, order));
 
   let statsSection = null;
   const statsGrid = () => {
@@ -426,33 +446,39 @@ button.rk-profile-chip:active { transform: scale(0.97); }
     name: 'Presence pill',
     description: 'Shows if the user is online, in Studio or in game, with a join button.',
     pages: PROFILE,
-    css: `${headerCss}
-.rk-profile-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.rk-profile-pills .rk-btn.rk-btn-sm { height: 22px; padding: 0 8px; font-size: 12px; }
-`,
+    css: statusCss,
     async run() {
       const id = profileId();
       if (!id) return;
       const entry = (await presenceOf([id])).get(id);
       if (!entry) return;
       const type = presenceType(entry);
-      const status = (tone, label) => el('span', { class: `rk-pill rk-pill-${tone}` }, el('span', { class: 'rk-profile-dot' }), label);
+      const status = (state, ...children) => el('span', { class: `rk-profile-state rk-profile-state-${state}` }, ...children);
       if (type === 2) {
         const placeId = Rk.isId(entry.rootPlaceId) ? Number(entry.rootPlaceId) : Rk.isId(entry.placeId) ? Number(entry.placeId) : null;
         const game = typeof entry.lastLocation === 'string' ? entry.lastLocation.trim() : '';
-        const pill = status('success', game ? `Playing ${game}` : 'In game');
+        const label = game ? `Playing ${game}` : 'In game';
         const own = await ownProfile();
-        addPill(el('span', { class: 'rk-inline' },
-          placeId ? pillLink(`/games/${placeId}`, pill) : pill,
+        addStatus(el('span', { class: 'rk-inline' },
+          placeId ? el('a', { class: 'rk-profile-state rk-profile-state-game', href: `/games/${placeId}` }, label) : status('game', label),
           own || !placeId ? null : ui.button('Join', { variant: 'primary', icon: 'play', onClick: () => Rk.launch.follow(id) })
         ), 1);
       } else if (type === 1) {
-        addPill(status('accent', 'Online'), 1);
+        addStatus(status('online', 'Online'), 1);
       } else if (type === 3) {
-        addPill(status('warning', 'In Studio'), 1);
+        const logo = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        logo.setAttribute('viewBox', '157 157 710 710');
+        logo.setAttribute('width', '14');
+        logo.setAttribute('height', '14');
+        logo.setAttribute('aria-hidden', 'true');
+        const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        shape.setAttribute('fill-rule', 'evenodd');
+        shape.setAttribute('d', 'M227.807 452.65 307.063 157 867 307.065l-54.062 201.63-358.233-96.003-25.195 93.947zm-16.745 62.581 358.233 96.004 25.195-93.947 201.703 54.062L716.937 867 157 716.935z');
+        logo.append(shape);
+        addStatus(status('studio', logo, 'In Studio'), 1);
       } else {
         const seen = toTime(entry.lastOnline);
-        if (seen) addPill(ui.pill(`Last online ${fmt.ago(seen)}`, 'neutral', { title: fmt.dateTime(seen) }), 1);
+        if (seen) addStatus(el('span', { class: 'rk-profile-state rk-profile-state-offline', title: fmt.dateTime(seen) }, `Last online ${fmt.ago(seen)}`), 1);
       }
     }
   });
@@ -735,12 +761,12 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     name: 'Inventory privacy pill',
     description: 'Shows whether the inventory of the user is public or private.',
     pages: PROFILE,
-    css: headerCss,
+    css: statusCss,
     async run() {
       const id = profileId();
       const json = id ? await safe(Rk.api.get(`https://inventory.roblox.com/v1/users/${id}/can-view-inventory`, { cache: 60000 })) : null;
       if (!json || typeof json.canView !== 'boolean') return;
-      addPill(json.canView ? ui.pill('Inventory public', 'success') : ui.pill('Inventory private', 'neutral'), 7);
+      addStatus(json.canView ? el('span', { class: 'rk-profile-state rk-profile-state-public' }, 'Inventory public') : el('span', { class: 'rk-profile-state rk-profile-state-private' }, 'Inventory private'), 2);
     }
   });
 
