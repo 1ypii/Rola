@@ -1167,7 +1167,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         badge.classList.add('verified-badge-icon-header');
         name.after(el('section', null, badge));
       });
-      Rk.observe('a[href$="/users/profile"] .text-truncate-end', name => {
+      Rk.observe('a[href$="/users/profile"] > span .text-truncate-end', name => {
         if (name.hasAttribute('data-rk-self-verified') || name.parentElement.querySelector('[aria-label*="verified" i], [class*="verified" i]')) return;
         name.setAttribute('data-rk-self-verified', '');
         name.after(navBadge());
