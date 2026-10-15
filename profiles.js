@@ -1500,9 +1500,10 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     id: 'profiles.groupInfo',
     category: 'profiles',
     name: 'Community details',
-    description: 'Shows the community ID, owner, exact member count, entry type and shout details.',
+    description: 'Shows the community ID, owner, entry type and shout details.',
     pages: GROUP,
     css: `${copyableCss}
+.rk-group-owner { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
 .rk-group-top:not(:empty) { margin-bottom: 10px; }
 .rk-group-shout, .rk-group-extra:not(:empty) { margin-top: 10px; font-size: 13px; }
 `,
@@ -1521,7 +1522,8 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
           mark(isVerified(user.userId, user.hasVerifiedBadge === true || Boolean(info && info.hasVerifiedBadge === true)))
         );
       };
-      const owner = person(group.owner);
+      const ownerName = person(group.owner);
+      const owner = ownerName ? el('span', { class: 'rk-group-owner' }, ui.thumb(Rk.thumb('AvatarHeadShot', group.owner.userId, '150x150'), { size: 24, round: true }), ownerName) : null;
       const poster = shout ? person(shout.poster) : null;
       const posted = shout && toTime(shout.updated) ? fmt.dateTime(shout.updated) : null;
       const entry = group.publicEntryAllowed === true ? 'Anyone can join' : group.publicEntryAllowed === false ? 'Approval needed' : '-';
@@ -1531,7 +1533,6 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         ui.stats([
           ['Community ID', el('span', { class: 'rk-profile-copyable' }, String(id), ui.button('', { variant: 'ghost', icon: 'copy', title: 'Copy community ID', onClick: () => ui.copy(String(id), 'Community ID copied') }))],
           ['Owner', owner || 'No owner'],
-          ['Members', fmt.num(group.memberCount)],
           ['Public entry', entry]
         ]),
         poster || posted ? el('div', { class: 'rk-group-shout rk-muted' }, poster ? ['Shout by ', poster] : 'Shout posted', posted ? ` on ${posted}` : null) : null,
@@ -1544,10 +1545,10 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     id: 'profiles.groupGames',
     category: 'profiles',
     name: 'Community experiences',
-    description: 'Lists the experiences of the community with visits and active players.',
+    description: 'Lists the experiences of the community with visits and active players in place of the Roblox list.',
     pages: GROUP,
-    css: listCss,
-    async run() {
+    css: `${listCss}${nativeCss('groupgames', 'group-games')}`,
+    run: replacing('groupgames', async () => {
       const id = groupId();
       const list = id ? await safe(Rk.api.paged(`https://games.roblox.com/v2/groups/${id}/games?accessFilter=Public&sortOrder=Desc`, { max: 100, limit: 50 })) : null;
       const games = Array.isArray(list) ? list.filter(game => game && Rk.isId(game.id) && game.rootPlace && Rk.isId(game.rootPlace.id)) : [];
@@ -1566,24 +1567,75 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         );
       });
       const [rowsNode, more] = collapsible(rows, 8);
-      addSection('group', ui.section('Community experiences', rowsNode, { className: 'rk-group-games', actions: [ui.pill(fmt.num(games.length)), more] }), 2);
-    }
+      return addSection('group', ui.section('Community experiences', rowsNode, { className: 'rk-group-games', actions: [ui.pill(fmt.num(games.length)), more] }), 2, { replace: 'group-games' });
+    })
   });
 
   Rk.feature({
     id: 'profiles.groupRoles',
     category: 'profiles',
     name: 'Community roles',
-    description: 'Shows every role in the community with its rank and member count.',
+    description: 'Shows every role in the community. Open a role to see its members.',
     pages: GROUP,
+    css: `${tilesCss}
+.rk-group-role { border-bottom: 1px solid var(--rk-border); }
+.rk-group-role:last-child { border-bottom: 0; }
+.rk-group-role > summary { display: flex; align-items: center; gap: 12px; padding: 10px 4px; cursor: pointer; list-style: none; font-family: var(--rk-font); font-size: 14px; }
+.rk-group-role > summary::-webkit-details-marker { display: none; }
+.rk-group-role > summary::before { content: ''; flex: none; width: 6px; height: 6px; border-right: 2px solid var(--rk-muted); border-bottom: 2px solid var(--rk-muted); transform: rotate(-45deg); transition: transform var(--rk-fast) var(--rk-ease); }
+.rk-group-role[open] > summary::before { transform: rotate(45deg); }
+.rk-group-role-name { flex: 1; min-width: 0; overflow: hidden; font-weight: 600; color: var(--rk-text-strong); white-space: nowrap; text-overflow: ellipsis; }
+.rk-group-role-body { padding: 0 0 12px; }
+.rk-group-role-body > .rk-btn { margin-top: 8px; }
+`,
     async run() {
       const id = groupId();
       const json = id ? await safe(Rk.api.get(`https://groups.roblox.com/v1/groups/${id}/roles`, { cache: 60000 })) : null;
-      const roles = json && Array.isArray(json.roles) ? json.roles.filter(role => role && typeof role.name === 'string') : [];
+      const roles = json && Array.isArray(json.roles) ? json.roles.filter(role => role && typeof role.name === 'string' && Rk.isId(role.id)) : [];
       if (!roles.length) return;
       roles.sort((a, b) => (Number(b.rank) || 0) - (Number(a.rank) || 0));
-      const table = ui.table([{ label: 'Rank' }, { label: 'Name' }, { label: 'Members', align: 'right' }], roles.map(role => [fmt.num(role.rank), role.name, fmt.num(role.memberCount)]));
-      addSection('group', ui.section('Roles', table, { className: 'rk-group-roles', actions: ui.pill(fmt.num(roles.length)) }), 3);
+      const roleNode = role => {
+        const count = Number(role.memberCount) || 0;
+        const tiles = el('div', { class: 'rk-profile-tiles' });
+        const body = el('div', { class: 'rk-group-role-body' }, tiles);
+        let cursor = '';
+        let started = false;
+        let busy = false;
+        const more = ui.button('Load more', { variant: 'secondary', onClick: () => load() });
+        const load = async () => {
+          if (busy) return;
+          busy = true;
+          more.disabled = true;
+          if (!tiles.children.length) tiles.replaceWith(el('div', { class: 'rk-group-role-loading' }, ui.spinner(18)));
+          const page = await safe(Rk.api.get(`https://groups.roblox.com/v1/groups/${id}/roles/${role.id}/users?limit=100&sortOrder=Desc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`));
+          const loading = body.querySelector('.rk-group-role-loading');
+          if (loading) loading.replaceWith(tiles);
+          const users = page && Array.isArray(page.data) ? page.data.filter(user => user && Rk.isId(user.userId)) : [];
+          tiles.append(...users.map(user => tile(`/users/${user.userId}/profile`, ui.thumb(Rk.thumb('AvatarHeadShot', user.userId, '150x150'), { size: 64, round: true }), String(user.displayName || user.username || `User ${user.userId}`), mark(isVerified(user.userId, user.hasVerifiedBadge)))));
+          if (!page) body.append(el('div', { class: 'rk-muted' }, 'Could not load the members of this role'));
+          else if (!tiles.children.length) body.append(el('div', { class: 'rk-muted' }, 'Nobody has this role'));
+          cursor = page && typeof page.nextPageCursor === 'string' ? page.nextPageCursor : '';
+          if (cursor) body.append(more);
+          else more.remove();
+          more.disabled = false;
+          busy = false;
+        };
+        const node = el('details', { class: 'rk-group-role' },
+          el('summary', null,
+            el('span', { class: 'rk-group-role-name', title: role.name }, role.name),
+            el('span', { class: 'rk-muted' }, `Rank ${fmt.num(role.rank)}`),
+            el('span', { class: 'rk-muted' }, fmt.plural(count, 'member'))
+          ),
+          body
+        );
+        node.addEventListener('toggle', () => {
+          if (!node.open || started) return;
+          started = true;
+          load();
+        });
+        return node;
+      };
+      addSection('group', ui.section('Roles', el('div', null, roles.map(roleNode)), { className: 'rk-group-roles', actions: ui.pill(fmt.num(roles.length)) }), 3);
     }
   });
 

@@ -168,7 +168,7 @@
   const cardCss = `
     .rk-trading-card { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-family: var(--rk-font); font-size: 12px; line-height: 1.3; color: var(--rk-muted); animation: rk-fade var(--rk-fast) ease both; }
     .rk-trading-card:empty { display: none; }
-    .rk-trading-card .rk-pill { height: 18px; padding: 0 6px; font-size: 11px; }
+    .rk-trading-card .rk-pill { height: 18px; font-size: 11px; }
     .rk-trading-card .rk-robux { font-size: 12px; }
     .rk-trading-card-value, .rk-trading-card-part, .rk-trading-card-flags { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
     .rk-trading-card-value { gap: 8px; }
@@ -782,9 +782,9 @@
     name: 'Serial highlights',
     description: 'Highlights serial #1 and serials up to 100 in collectible lists.',
     css: `
-      .rk-pill.rk-serial-1 { background: var(--rk-accent-soft); color: var(--rk-accent); }
+      .rk-pill.rk-serial-1 { color: var(--rk-accent); }
       .dark-theme .rk-pill.rk-serial-1 { color: color-mix(in srgb, var(--rk-accent) 55%, var(--rk-text-strong)); }
-      .rk-pill.rk-serial-low { background: var(--rk-warning-soft); color: var(--rk-warning); }
+      .rk-pill.rk-serial-low { color: var(--rk-warning); }
     `
   });
 

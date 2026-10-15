@@ -1474,7 +1474,6 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
 .rk-servers-row .rk-pill,
 .rk-servers-saved-row .rk-pill {
   height: 18px;
-  padding: 0 6px;
   font-size: 11px;
 }
 .rk-servers-heads {
