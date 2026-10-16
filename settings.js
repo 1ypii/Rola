@@ -6,13 +6,7 @@
   let lastScroll = 0;
   let query = '';
   let localChange = false;
-  let theme = Rk.store.get('settings.theme', 'sakura') === 'classic' ? 'classic' : 'sakura';
-
   const defaultMascot = chrome.runtime.getURL('mascot.png');
-  const mascotUrl = () => {
-    const saved = Rk.store.get('settings.mascot', '');
-    return typeof saved === 'string' && /^https:\/\/[^\s"'()]+$/i.test(saved) ? saved : defaultMascot;
-  };
 
   const directImageLink = text => {
     let link;
@@ -33,6 +27,84 @@
     probe.src = src;
   });
 
+  const themeFields = [
+    ['title', 'Title bar', '--rk-theme-title', '#ff6fae'],
+    ['titleText', 'Title text', '--rk-theme-title-text', '#ffffff'],
+    ['border', 'Window border', '--rk-theme-border', '#ff7eb6'],
+    ['bg', 'Background', '--rk-bg', '#fff0f5'],
+    ['surface', 'Sidebar', '--rk-surface', '#ffe3ee'],
+    ['card', 'Cards', '--rk-theme-card', '#fff7fa'],
+    ['input', 'Inputs', '--rk-theme-input', '#ffffff'],
+    ['accent', 'Accent', '--rk-accent', '#ff5fa2'],
+    ['heading', 'Headings', '--rk-text-strong', '#3d2533'],
+    ['text', 'Text', '--rk-text', '#5a3a4a'],
+    ['muted', 'Muted text', '--rk-muted', '#a3708b'],
+    ['line', 'Lines', '--rk-border', '#f6b0cf']
+  ];
+
+  const isColor = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+
+  const cleanTheme = raw => {
+    if (!raw || typeof raw !== 'object' || !raw.colors || typeof raw.colors !== 'object') return null;
+    const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 40) : '';
+    if (!name) return null;
+    const colors = {};
+    for (const [key, , , fallback] of themeFields) colors[key] = isColor(raw.colors[key]) ? raw.colors[key].toLowerCase() : fallback;
+    const mascot = typeof raw.mascot === 'string' && raw.mascot.trim() ? directImageLink(raw.mascot.trim()) || '' : '';
+    return { name, colors, mascot };
+  };
+
+  const savedThemes = () => {
+    const list = Rk.store.get('settings.themes', []);
+    if (!Array.isArray(list)) return [];
+    return list.slice(0, 30).map(item => {
+      const clean = cleanTheme(item);
+      return clean && typeof item.id === 'string' && /^t\d+$/.test(item.id) ? { id: item.id, ...clean } : null;
+    }).filter(Boolean);
+  };
+
+  const themeChoices = () => [['sakura', 'Sakura'], ['classic', 'Classic'], ...savedThemes().map(item => [item.id, item.name])];
+
+  let theme = Rk.store.get('settings.theme', 'sakura');
+  if (!themeChoices().some(([id]) => id === theme)) theme = 'sakura';
+
+  const activeTheme = () => savedThemes().find(item => item.id === theme) || null;
+
+  const themeCode = item => {
+    const bytes = new TextEncoder().encode(JSON.stringify({ name: item.name, colors: item.colors, mascot: item.mascot }));
+    return `rola-theme:${btoa(String.fromCharCode(...bytes))}`;
+  };
+
+  const readThemeCode = code => {
+    const match = /^rola-theme:([A-Za-z0-9+/=]+)$/.exec(code.trim());
+    if (!match) return null;
+    try {
+      const bytes = Uint8Array.from(atob(match[1]), char => char.charCodeAt(0));
+      return cleanTheme(JSON.parse(new TextDecoder().decode(bytes)));
+    } catch {
+      return null;
+    }
+  };
+
+  const applyTheme = (frame, colors) => {
+    const custom = colors || (activeTheme() || {}).colors;
+    frame.classList.toggle('rk-sakura', Boolean(colors) || theme !== 'classic');
+    frame.style.cssText = custom ? themeFields.map(([key, , variable]) => `${variable}: ${custom[key]}`).join('; ') : '';
+  };
+
+  const mascotUrl = () => {
+    const custom = activeTheme();
+    if (custom && custom.mascot) return custom.mascot;
+    const saved = Rk.store.get('settings.mascot', '');
+    return typeof saved === 'string' && /^https:\/\/[^\s"'()]+$/i.test(saved) ? saved : defaultMascot;
+  };
+
+  const saveMascot = link => {
+    const custom = activeTheme();
+    if (custom) Rk.store.set('settings.themes', savedThemes().map(item => (item.id === custom.id ? { ...item, mascot: link } : item)));
+    else Rk.store.set('settings.mascot', link);
+  };
+
   const buildMascot = () => {
     const image = el('img', { class: 'rk-mascot-img', alt: '', draggable: 'false' });
     image.addEventListener('error', () => {
@@ -41,12 +113,13 @@
     image.src = mascotUrl();
     const mascot = el('div', { class: 'rk-mascot', title: 'Double click to change the image' }, image);
     mascot.addEventListener('dblclick', async () => {
-      const current = Rk.store.get('settings.mascot', '');
+      const custom = activeTheme();
+      const current = custom ? custom.mascot : Rk.store.get('settings.mascot', '');
       const next = await ui.prompt('Paste a direct image or gif link, or leave it empty for the default.', { title: 'Mascot image', placeholder: 'https://', value: typeof current === 'string' ? current : '', maxLength: 2000 });
       if (next === null) return;
       if (!next.trim()) {
-        Rk.store.set('settings.mascot', '');
-        image.src = defaultMascot;
+        saveMascot('');
+        image.src = mascotUrl();
         return;
       }
       const link = directImageLink(next.trim());
@@ -58,10 +131,133 @@
         ui.toast('That image could not load, right click the image and use copy image address', { tone: 'danger', duration: 6000 });
         return;
       }
-      Rk.store.set('settings.mascot', link);
+      saveMascot(link);
       image.src = link;
     });
     return mascot;
+  };
+
+  const setTheme = next => {
+    theme = next;
+    Rk.store.set('settings.theme', theme);
+    if (!panel) return;
+    panel.themePicker.replaceChildren(...themeChoices().map(([value, label]) => el('option', { value }, label)));
+    panel.themePicker.value = theme;
+    panel.themeEdit.textContent = activeTheme() ? 'Edit' : 'Make your own';
+    applyTheme(panel.frame);
+    panel.mascot.firstChild.src = mascotUrl();
+  };
+
+  const editTheme = () => {
+    if (!panel) return;
+    const editing = activeTheme();
+    const base = editing || { name: 'My theme', colors: Object.fromEntries(themeFields.map(([key, , , fallback]) => [key, fallback])), mascot: '' };
+    const draft = { name: base.name, colors: { ...base.colors }, mascot: base.mascot };
+    let saved = false;
+    const preview = () => {
+      if (panel) applyTheme(panel.frame, draft.colors);
+    };
+    const nameField = ui.input({ value: draft.name, maxLength: 40, onInput: value => {
+      draft.name = value;
+    } });
+    const mascotField = ui.input({ value: draft.mascot, placeholder: 'Mascot image link, optional', maxLength: 2000, className: 'rk-theme-mascot', onInput: value => {
+      draft.mascot = value;
+    } });
+    const pickers = new Map();
+    const grid = el('div', { class: 'rk-theme-grid' }, themeFields.map(([key, label]) => {
+      const picker = el('input', { type: 'color', 'aria-label': label });
+      picker.value = draft.colors[key];
+      picker.addEventListener('input', () => {
+        draft.colors[key] = picker.value;
+        preview();
+      });
+      pickers.set(key, picker);
+      return el('label', { class: 'rk-theme-field' }, picker, el('span', null, label));
+    }));
+    const fill = item => {
+      draft.name = item.name;
+      draft.mascot = item.mascot;
+      nameField.value = item.name;
+      mascotField.value = item.mascot;
+      for (const [key, picker] of pickers) {
+        draft.colors[key] = item.colors[key];
+        picker.value = item.colors[key];
+      }
+      preview();
+    };
+    const copyCode = () => {
+      const clean = cleanTheme(draft);
+      if (!clean) {
+        ui.toast('Give the theme a name first', { tone: 'warning' });
+        return;
+      }
+      ui.copy(themeCode(clean), 'Theme code copied, anyone with Rola can import it');
+    };
+    const importCode = async () => {
+      const code = await ui.prompt('Paste a Rola theme code someone shared with you.', { title: 'Import theme', placeholder: 'rola-theme:', maxLength: 20000, confirmLabel: 'Import' });
+      if (code === null) return;
+      const item = readThemeCode(code);
+      if (!item) {
+        ui.toast('That is not a Rola theme code', { tone: 'danger' });
+        return;
+      }
+      fill(item);
+      ui.toast('Theme loaded, press save to keep it', { tone: 'success' });
+    };
+    const save = () => {
+      const clean = cleanTheme(draft);
+      if (!clean) {
+        ui.toast('Give the theme a name first', { tone: 'warning' });
+        return;
+      }
+      if (draft.mascot.trim() && !clean.mascot) {
+        ui.toast('The mascot has to be an https image link', { tone: 'warning' });
+        return;
+      }
+      const list = savedThemes();
+      if (!editing && list.length >= 30) {
+        ui.toast('You can keep up to 30 themes', { tone: 'warning' });
+        return;
+      }
+      const id = editing ? editing.id : `t${Date.now()}`;
+      Rk.store.set('settings.themes', editing ? list.map(item => (item.id === id ? { id, ...clean } : item)) : [...list, { id, ...clean }]);
+      saved = true;
+      handle.close();
+      setTheme(id);
+      ui.toast('Theme saved', { tone: 'success' });
+    };
+    const remove = async () => {
+      const confirmed = await ui.confirm(`"${editing.name}" will be deleted.`, { title: 'Delete theme', confirmLabel: 'Delete', danger: true });
+      if (!confirmed) return;
+      Rk.store.set('settings.themes', savedThemes().filter(item => item.id !== editing.id));
+      saved = true;
+      handle.close();
+      setTheme('sakura');
+    };
+    const removeButton = editing ? ui.button('Delete', { variant: 'ghost', onClick: remove }) : null;
+    if (removeButton) removeButton.classList.add('rk-settings-reset');
+    const handle = ui.modal({
+      title: editing ? 'Edit theme' : 'New theme',
+      width: 500,
+      content: [
+        el('label', { class: 'rk-theme-name' }, el('span', null, 'Name'), nameField),
+        grid,
+        mascotField,
+        el('div', { class: 'rk-inline' },
+          ui.button('Copy share code', { variant: 'ghost', onClick: copyCode }),
+          ui.button('Import code', { variant: 'ghost', onClick: importCode })
+        )
+      ],
+      actions: [
+        removeButton,
+        ui.button('Cancel', { variant: 'secondary', size: 'md', onClick: () => handle.close() }),
+        ui.button('Save', { variant: 'primary', size: 'md', onClick: save })
+      ].filter(Boolean),
+      onClose: () => {
+        if (!saved && panel) applyTheme(panel.frame);
+      }
+    });
+    preview();
   };
 
   const categoryName = id => {
@@ -265,11 +461,8 @@
       return item;
     }));
     const total = el('div');
-    const themePicker = ui.select([['sakura', 'Sakura'], ['classic', 'Classic']], theme, next => {
-      theme = next === 'classic' ? 'classic' : 'sakura';
-      Rk.store.set('settings.theme', theme);
-      frame.classList.toggle('rk-sakura', theme === 'sakura');
-    });
+    const themePicker = ui.select(themeChoices(), theme, setTheme);
+    const themeEdit = ui.button(activeTheme() ? 'Edit' : 'Make your own', { variant: 'ghost', onClick: editTheme });
     const title = el('h2', { class: 'rk-settings-title' });
     const subtitle = el('p', { class: 'rk-settings-subtitle' });
     const bulk = el('div', { class: 'rk-inline' },
@@ -308,11 +501,12 @@
         el('div', { class: 'rk-settings-search' }, icon('search', 16), search),
         nav,
         mascot,
-        el('div', { class: 'rk-settings-side-footer' }, total, el('label', { class: 'rk-settings-theme' }, el('span', null, 'Theme'), themePicker))
+        el('div', { class: 'rk-settings-side-footer' }, total, el('div', { class: 'rk-settings-theme' }, el('span', null, 'Theme'), themePicker, themeEdit))
       ),
       main
     );
-    const frame = el('div', { class: `rk-settings-frame${theme === 'sakura' ? ' rk-sakura' : ''}` }, dialog);
+    const frame = el('div', { class: 'rk-settings-frame' }, dialog);
+    applyTheme(frame);
     const backdrop = el('div', { class: 'rk-modal-backdrop', onmousedown: event => {
       if (event.target === backdrop) close();
     } }, frame);
@@ -322,7 +516,7 @@
         close();
       }
     });
-    return { backdrop, dialog, mascot, search, counts, navItems, total, title, subtitle, bulk, list, banner, foot, main, previousOverflow: '' };
+    return { backdrop, dialog, frame, themePicker, themeEdit, mascot, search, counts, navItems, total, title, subtitle, bulk, list, banner, foot, main, previousOverflow: '' };
   };
 
   const open = () => {
