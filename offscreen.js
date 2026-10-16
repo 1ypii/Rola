@@ -8,8 +8,9 @@ const finish = () => {
   }
 };
 
-const chime = () => {
+const chime = async () => {
   const context = new AudioContext();
+  await context.resume().catch(() => {});
   const now = context.currentTime;
   const notes = [[880, 0], [1318.51, 0.11]];
   let last = null;
@@ -25,6 +26,11 @@ const chime = () => {
     tone.start(now + offset);
     tone.stop(now + offset + 0.85);
     last = tone;
+  }
+  if (context.state !== 'running') {
+    context.close();
+    finish();
+    return;
   }
   last.addEventListener('ended', () => {
     context.close();
