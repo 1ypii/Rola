@@ -1243,16 +1243,17 @@
 }
 
 .rk-sakura .rk-mascot {
+  position: relative;
   flex: 1;
   display: flex;
   align-items: flex-end;
   justify-content: center;
   min-height: 0;
+  margin: 0 -12px;
   overflow: hidden;
   opacity: 0;
   transform: translateY(24px);
   transition: opacity 360ms ease 120ms, transform 520ms var(--rk-ease) 120ms;
-  pointer-events: none;
 }
 
 .rk-sakura .rk-mascot.rk-mascot-shown {
@@ -1260,71 +1261,49 @@
   transform: translateY(0);
 }
 
-.rk-mascot svg {
+.rk-mascot-img {
   display: block;
-  width: auto;
-  height: 100%;
-  max-height: 300px;
-  overflow: visible;
-  pointer-events: auto;
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: 50% 100%;
+  transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(#000000 82%, transparent);
+  mask-image: linear-gradient(#000000 82%, transparent);
+  user-select: none;
+  animation: rk-mascot-breathe 4.2s ease-in-out infinite;
+}
+
+.rk-mascot:hover .rk-mascot-img {
+  animation: rk-mascot-hop 620ms var(--rk-ease);
+}
+
+.rk-mascot-bubble {
+  position: absolute;
+  right: 18px;
+  bottom: min(calc(100% - 34px), 200px);
+  z-index: 1;
+  padding: 3px 10px;
+  border: 2px solid #ff7eb6;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #ff5fa2;
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 220ms ease, transform 300ms var(--rk-ease);
+  pointer-events: none;
+}
+
+.rk-mascot:hover .rk-mascot-bubble {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .rk-sakura .rk-settings-side-footer {
   margin-top: 0;
-}
-
-.rk-mascot-figure {
-  animation: rk-mascot-bob 3.2s ease-in-out infinite;
-}
-
-.rk-mascot-tail,
-.rk-mascot-eyes,
-.rk-mascot-arm,
-.rk-mascot-wave {
-  transform-box: view-box;
-}
-
-.rk-mascot-tail-l {
-  transform-origin: 52px 76px;
-  animation: rk-mascot-sway 2.8s ease-in-out infinite alternate;
-}
-
-.rk-mascot-tail-r {
-  transform-origin: 148px 76px;
-  animation: rk-mascot-sway 2.8s ease-in-out -1.4s infinite alternate-reverse;
-}
-
-.rk-mascot-eyes {
-  transform-origin: 100px 100px;
-  animation: rk-mascot-blink 4.6s ease-in-out infinite;
-}
-
-.rk-mascot-arm {
-  transform-origin: 120px 154px;
-  transition: transform 380ms var(--rk-ease);
-}
-
-.rk-mascot-wave {
-  transform-origin: 120px 154px;
-}
-
-.rk-mascot svg:hover .rk-mascot-arm {
-  transform: rotate(-140deg);
-}
-
-.rk-mascot svg:hover .rk-mascot-wave {
-  animation: rk-mascot-wave 0.5s ease-in-out 0.3s infinite alternate;
-}
-
-.rk-mascot-bubble {
-  opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 220ms ease, transform 300ms var(--rk-ease);
-}
-
-.rk-mascot svg:hover .rk-mascot-bubble {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 @media (max-width: 760px) {
@@ -1334,42 +1313,28 @@
   }
 }
 
-@keyframes rk-mascot-bob {
+@keyframes rk-mascot-breathe {
   0%,
   100% {
-    transform: translateY(0);
+    transform: scale(1) rotate(0deg);
   }
   50% {
-    transform: translateY(-3px);
+    transform: scale(1.012) rotate(-0.8deg);
   }
 }
 
-@keyframes rk-mascot-sway {
-  from {
-    transform: rotate(-4deg);
+@keyframes rk-mascot-hop {
+  0% {
+    transform: translateY(0);
   }
-  to {
-    transform: rotate(4deg);
+  40% {
+    transform: translateY(-8px);
   }
-}
-
-@keyframes rk-mascot-blink {
-  0%,
-  90%,
+  70% {
+    transform: translateY(1px);
+  }
   100% {
-    transform: scaleY(1);
-  }
-  94% {
-    transform: scaleY(0.1);
-  }
-}
-
-@keyframes rk-mascot-wave {
-  from {
-    transform: rotate(-12deg);
-  }
-  to {
-    transform: rotate(12deg);
+    transform: translateY(0);
   }
 }
 

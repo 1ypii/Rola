@@ -57,5 +57,11 @@
       ],
       "run_at": "document_start"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["mascot.png"],
+      "matches": ["https://www.roblox.com/*"]
+    }
   ]
 }
