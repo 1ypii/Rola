@@ -1243,6 +1243,85 @@
   border: 0;
 }
 
+.rk-futuristic {
+  --rk-accent-text: #04121a;
+  --rk-success: #34f5a4;
+  --rk-warning: #ffd166;
+  --rk-danger: #ff5c8a;
+  color-scheme: dark;
+}
+
+.rk-futuristic .rk-settings {
+  background-image: linear-gradient(color-mix(in srgb, var(--rk-accent) 5%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--rk-accent) 5%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--rk-accent) 25%, transparent), 0 0 36px color-mix(in srgb, var(--rk-accent) 28%, transparent), 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+
+.rk-futuristic .rk-settings-titlebar {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(90deg, var(--rk-theme-title), color-mix(in srgb, var(--rk-theme-title) 70%, var(--rk-accent)) 50%, var(--rk-theme-title));
+  border-bottom: 1px solid color-mix(in srgb, var(--rk-accent) 60%, transparent);
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--rk-theme-title-text) 70%, transparent);
+}
+
+.rk-futuristic .rk-settings-titlebar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--rk-accent) 22%, transparent), transparent);
+  animation: rk-future-sweep 4.5s linear infinite;
+  pointer-events: none;
+}
+
+.rk-futuristic .rk-settings-side {
+  background: color-mix(in srgb, var(--rk-surface) 88%, transparent);
+  box-shadow: inset 0 0 18px color-mix(in srgb, var(--rk-accent) 8%, transparent);
+}
+
+.rk-futuristic .rk-settings-title {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--rk-accent) 55%, transparent);
+}
+
+.rk-futuristic .rk-settings-nav-item[aria-current="true"] {
+  text-shadow: 0 0 8px color-mix(in srgb, var(--rk-accent) 60%, transparent);
+}
+
+.rk-futuristic .rk-setting {
+  transition: border-color var(--rk-med) ease, box-shadow var(--rk-med) ease;
+}
+
+.rk-futuristic .rk-setting:hover {
+  border-color: color-mix(in srgb, var(--rk-accent) 55%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--rk-accent) 16%, transparent);
+}
+
+.rk-futuristic .rk-toggle[aria-checked="true"] {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--rk-accent) 55%, transparent);
+}
+
+.rk-futuristic .rk-input:focus,
+.rk-futuristic .rk-select:focus {
+  box-shadow: 0 0 0 1px var(--rk-accent), 0 0 12px color-mix(in srgb, var(--rk-accent) 35%, transparent);
+}
+
+@keyframes rk-future-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(440%);
+  }
+}
+
 .rk-sakura .rk-mascot {
   position: relative;
   flex: 1;
@@ -1396,6 +1475,7 @@
   .rk-progress-fill,
   .rk-mascot,
   .rk-mascot *,
+  .rk-settings-titlebar::after,
   [data-rk-tip]::after {
     animation: none !important;
     transition: none !important;

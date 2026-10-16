@@ -63,7 +63,22 @@
     }).filter(Boolean);
   };
 
-  const themeChoices = () => [['sakura', 'Sakura'], ['classic', 'Classic'], ...savedThemes().map(item => [item.id, item.name])];
+  const futuristicColors = {
+    title: '#0a1424',
+    titleText: '#5ef2ff',
+    border: '#22d3ee',
+    bg: '#070b14',
+    surface: '#0b1322',
+    card: '#0d1828',
+    input: '#060a12',
+    accent: '#22d3ee',
+    heading: '#e6fbff',
+    text: '#b6c8d9',
+    muted: '#6b85a0',
+    line: '#1c3a52'
+  };
+
+  const themeChoices = () => [['sakura', 'Sakura'], ['futuristic', 'Futuristic'], ['classic', 'Classic'], ...savedThemes().map(item => [item.id, item.name])];
 
   let theme = Rk.store.get('settings.theme', 'sakura');
   if (!themeChoices().some(([id]) => id === theme)) theme = 'sakura';
@@ -87,8 +102,9 @@
   };
 
   const applyTheme = (frame, colors) => {
-    const custom = colors || (activeTheme() || {}).colors;
+    const custom = colors || (theme === 'futuristic' ? futuristicColors : (activeTheme() || {}).colors);
     frame.classList.toggle('rk-sakura', Boolean(colors) || theme !== 'classic');
+    frame.classList.toggle('rk-futuristic', !colors && theme === 'futuristic');
     frame.style.cssText = custom ? themeFields.map(([key, , variable]) => `${variable}: ${custom[key]}`).join('; ') : '';
   };
 
@@ -151,7 +167,7 @@
   const editTheme = () => {
     if (!panel) return;
     const editing = activeTheme();
-    const base = editing || { name: 'My theme', colors: Object.fromEntries(themeFields.map(([key, , , fallback]) => [key, fallback])), mascot: '' };
+    const base = editing || { name: 'My theme', colors: theme === 'futuristic' ? futuristicColors : Object.fromEntries(themeFields.map(([key, , , fallback]) => [key, fallback])), mascot: '' };
     const draft = { name: base.name, colors: { ...base.colors }, mascot: base.mascot };
     let saved = false;
     const preview = () => {
