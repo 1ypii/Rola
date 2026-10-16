@@ -44,26 +44,49 @@ const chime = async () => {
   }, { once: true });
 };
 
+const audioType = bytes => {
+  const head = String.fromCharCode(...bytes);
+  if (head === 'OggS') return 'audio/ogg';
+  if (head === 'RIFF') return 'audio/wav';
+  if (head === 'fLaC') return 'audio/flac';
+  return 'audio/mpeg';
+};
+
+const loadAudio = async src => {
+  const response = await fetch(src);
+  if (!response.ok) throw new Error(`audio request failed ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  return URL.createObjectURL(new Blob([buffer], { type: audioType(new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength))) }));
+};
+
+const release = audio => {
+  if (audio.src.startsWith('blob:')) URL.revokeObjectURL(audio.src);
+  audio.removeAttribute('src');
+};
+
 const clip = src => {
-  const audio = new Audio(src);
+  const audio = new Audio();
   let done = false;
   const end = fallback => {
     if (done) return;
     done = true;
-    audio.removeAttribute('src');
+    release(audio);
     if (fallback) chime();
     else finish();
   };
   audio.volume = 0.8;
   audio.addEventListener('ended', () => end(false), { once: true });
   audio.addEventListener('error', () => end(true), { once: true });
-  audio.play().catch(() => end(true));
+  loadAudio(src).then(url => {
+    audio.src = url;
+    return audio.play();
+  }).catch(() => end(true));
 };
 
 const stopMusic = () => {
   if (!music) return;
   music.pause();
-  music.removeAttribute('src');
+  release(music);
   music = null;
   musicId = null;
   closeIfIdle();
@@ -82,9 +105,9 @@ const setMusic = message => {
   if (typeof message.src !== 'string' || !message.src.startsWith('https://')) return;
   if (music) {
     music.pause();
-    music.removeAttribute('src');
+    release(music);
   }
-  const audio = new Audio(message.src);
+  const audio = new Audio();
   const fail = () => {
     if (music === audio) stopMusic();
   };
@@ -93,7 +116,14 @@ const setMusic = message => {
   audio.loop = true;
   audio.volume = volume;
   audio.addEventListener('error', fail, { once: true });
-  audio.play().catch(fail);
+  loadAudio(message.src).then(url => {
+    if (music !== audio) {
+      URL.revokeObjectURL(url);
+      return null;
+    }
+    audio.src = url;
+    return audio.play();
+  }).catch(fail);
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

@@ -127,8 +127,12 @@
     ...savedThemes().map(item => [item.id, item.name])
   ];
 
-  let theme = Rk.store.get('settings.theme', 'sakura');
-  if (!themeChoices().some(([id]) => id === theme)) theme = 'sakura';
+  const storedTheme = () => {
+    const saved = Rk.store.get('settings.theme', 'sakura');
+    return themeChoices().some(([id]) => id === saved) ? saved : 'sakura';
+  };
+
+  let theme = 'sakura';
 
   const activeTheme = () => savedThemes().find(item => item.id === theme) || null;
   const currentTheme = () => builtInThemes[theme] || activeTheme();
@@ -686,6 +690,7 @@
       activeCategory = saved.category;
       lastScroll = Number(saved.scroll) || 0;
     }
+    theme = storedTheme();
     panel = build();
     panel.previousOverflow = document.documentElement.style.overflow;
     document.documentElement.style.overflow = 'hidden';
