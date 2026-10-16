@@ -1269,37 +1269,14 @@
   object-fit: contain;
   object-position: 50% 100%;
   transform-origin: 50% 100%;
-  -webkit-mask-image: linear-gradient(#000000 82%, transparent);
-  mask-image: linear-gradient(#000000 82%, transparent);
+  -webkit-mask-image: linear-gradient(#000000 90%, transparent);
+  mask-image: linear-gradient(#000000 90%, transparent);
   user-select: none;
   animation: rk-mascot-breathe 4.2s ease-in-out infinite;
 }
 
 .rk-mascot:hover .rk-mascot-img {
   animation: rk-mascot-hop 620ms var(--rk-ease);
-}
-
-.rk-mascot-bubble {
-  position: absolute;
-  right: 18px;
-  bottom: min(calc(100% - 34px), 200px);
-  z-index: 1;
-  padding: 3px 10px;
-  border: 2px solid #ff7eb6;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #ff5fa2;
-  font-size: 13px;
-  font-weight: 700;
-  opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 220ms ease, transform 300ms var(--rk-ease);
-  pointer-events: none;
-}
-
-.rk-mascot:hover .rk-mascot-bubble {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .rk-sakura .rk-settings-side-footer {

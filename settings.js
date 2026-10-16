@@ -14,24 +14,52 @@
     return typeof saved === 'string' && /^https:\/\/[^\s"'()]+$/i.test(saved) ? saved : defaultMascot;
   };
 
+  const directImageLink = text => {
+    let link;
+    try {
+      link = new URL(text);
+    } catch {
+      return null;
+    }
+    const wrapped = link.searchParams.get('imgurl') || link.searchParams.get('mediaurl');
+    if (wrapped) return directImageLink(wrapped);
+    return link.protocol === 'https:' && /^https:\/\/[^\s"'()]+$/i.test(link.href) ? link.href : null;
+  };
+
+  const canLoad = src => new Promise(resolve => {
+    const probe = new Image();
+    probe.onload = () => resolve(probe.naturalWidth > 0);
+    probe.onerror = () => resolve(false);
+    probe.src = src;
+  });
+
   const buildMascot = () => {
     const image = el('img', { class: 'rk-mascot-img', alt: '', draggable: 'false' });
     image.addEventListener('error', () => {
       if (image.src !== defaultMascot) image.src = defaultMascot;
     });
     image.src = mascotUrl();
-    const mascot = el('div', { class: 'rk-mascot', title: 'Double click to change the image' }, el('span', { class: 'rk-mascot-bubble' }, 'hi!'), image);
+    const mascot = el('div', { class: 'rk-mascot', title: 'Double click to change the image' }, image);
     mascot.addEventListener('dblclick', async () => {
       const current = Rk.store.get('settings.mascot', '');
-      const next = await ui.prompt('Paste an https image or gif link, or leave it empty for the default.', { title: 'Mascot image', placeholder: 'https://', value: typeof current === 'string' ? current : '', maxLength: 500 });
+      const next = await ui.prompt('Paste a direct image or gif link, or leave it empty for the default.', { title: 'Mascot image', placeholder: 'https://', value: typeof current === 'string' ? current : '', maxLength: 2000 });
       if (next === null) return;
-      const link = next.trim();
-      if (link && !/^https:\/\/[^\s"'()]+$/i.test(link)) {
-        ui.toast('That has to be an https link', { tone: 'warning' });
+      if (!next.trim()) {
+        Rk.store.set('settings.mascot', '');
+        image.src = defaultMascot;
+        return;
+      }
+      const link = directImageLink(next.trim());
+      if (!link) {
+        ui.toast('That has to be an https image link', { tone: 'warning' });
+        return;
+      }
+      if (!(await canLoad(link))) {
+        ui.toast('That image could not load, right click the image and use copy image address', { tone: 'danger', duration: 6000 });
         return;
       }
       Rk.store.set('settings.mascot', link);
-      image.src = mascotUrl();
+      image.src = link;
     });
     return mascot;
   };
