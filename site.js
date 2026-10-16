@@ -1280,6 +1280,342 @@
     `
   });
 
+  const soundPacks = {
+    csgo: {
+      label: 'CS:GO',
+      hover: [{ wave: 'square', from: 3200, to: 3000, length: 0.012, gain: 0.05 }],
+      click: [{ noise: 'bandpass', freq: 2500, length: 0.03, gain: 0.5 }, { wave: 'square', from: 1900, to: 1500, length: 0.035, gain: 0.12 }]
+    },
+    chill: {
+      label: 'Chill',
+      hover: [{ wave: 'sine', from: 659, length: 0.12, gain: 0.08 }],
+      click: [{ wave: 'sine', from: 523, length: 0.25, gain: 0.25 }, { wave: 'sine', from: 784, length: 0.3, gain: 0.12, delay: 0.04 }]
+    },
+    minimal: {
+      label: 'Minimal',
+      hover: [{ wave: 'sine', from: 1400, length: 0.012, gain: 0.06 }],
+      click: [{ wave: 'sine', from: 1000, length: 0.025, gain: 0.18 }]
+    },
+    mechanical: {
+      label: 'Mechanical keyboard',
+      hover: [{ noise: 'bandpass', freq: 3000, length: 0.008, gain: 0.2 }],
+      click: [{ noise: 'bandpass', freq: 2000, length: 0.015, gain: 0.5 }, { noise: 'lowpass', freq: 300, length: 0.04, gain: 0.5, delay: 0.012 }]
+    },
+    typewriter: {
+      label: 'Typewriter',
+      hover: [{ noise: 'highpass', freq: 5000, length: 0.01, gain: 0.2 }],
+      click: [{ noise: 'highpass', freq: 3500, length: 0.025, gain: 0.5 }, { noise: 'bandpass', freq: 400, length: 0.04, gain: 0.4 }]
+    },
+    wood: {
+      label: 'Wood',
+      hover: [{ noise: 'bandpass', freq: 1400, length: 0.02, gain: 0.25 }],
+      click: [{ noise: 'bandpass', freq: 800, length: 0.05, gain: 0.6 }, { wave: 'sine', from: 200, to: 120, length: 0.07, gain: 0.3 }]
+    },
+    glass: {
+      label: 'Glass',
+      hover: [{ wave: 'sine', from: 2637, length: 0.1, gain: 0.07 }],
+      click: [{ wave: 'triangle', from: 2093, length: 0.35, gain: 0.14 }, { wave: 'sine', from: 3136, length: 0.3, gain: 0.08, delay: 0.01 }]
+    },
+    bubble: {
+      label: 'Bubble',
+      hover: [{ wave: 'sine', from: 600, to: 900, length: 0.05, gain: 0.15 }],
+      click: [{ wave: 'sine', from: 300, to: 1000, length: 0.09, gain: 0.35 }]
+    },
+    droplet: {
+      label: 'Droplet',
+      hover: [{ wave: 'sine', from: 1400, to: 1000, length: 0.03, gain: 0.12 }],
+      click: [{ wave: 'sine', from: 1200, to: 600, length: 0.06, gain: 0.3 }, { wave: 'sine', from: 1800, to: 900, length: 0.05, gain: 0.1, delay: 0.03 }]
+    },
+    pop: {
+      label: 'Pop',
+      hover: [{ wave: 'sine', from: 700, to: 400, length: 0.04, gain: 0.15 }],
+      click: [{ wave: 'sine', from: 400, to: 90, length: 0.08, gain: 0.45 }]
+    },
+    retro: {
+      label: 'Retro',
+      hover: [{ wave: 'square', from: 1320, length: 0.025, gain: 0.05 }],
+      click: [{ wave: 'square', from: 660, to: 990, length: 0.07, gain: 0.12 }]
+    },
+    arcade: {
+      label: 'Arcade',
+      hover: [{ wave: 'triangle', from: 1568, length: 0.03, gain: 0.08 }],
+      click: [{ wave: 'square', from: 523, length: 0.05, gain: 0.1 }, { wave: 'square', from: 784, length: 0.05, gain: 0.1, delay: 0.05 }, { wave: 'square', from: 1047, length: 0.07, gain: 0.1, delay: 0.1 }]
+    },
+    coin: {
+      label: 'Coin',
+      hover: [{ wave: 'square', from: 1976, length: 0.02, gain: 0.04 }],
+      click: [{ wave: 'square', from: 988, length: 0.06, gain: 0.08 }, { wave: 'square', from: 1319, length: 0.18, gain: 0.08, delay: 0.06 }]
+    },
+    laser: {
+      label: 'Laser',
+      hover: [{ wave: 'sawtooth', from: 900, to: 600, length: 0.04, gain: 0.03 }],
+      click: [{ wave: 'sawtooth', from: 1600, to: 180, length: 0.14, gain: 0.08 }]
+    },
+    scifi: {
+      label: 'Sci-fi',
+      hover: [{ wave: 'sine', from: 880, to: 1100, length: 0.06, gain: 0.08 }],
+      click: [{ wave: 'sine', from: 220, to: 880, length: 0.2, gain: 0.2 }, { wave: 'triangle', from: 440, to: 1760, length: 0.15, gain: 0.06 }]
+    }
+  };
+
+  Rk.feature({
+    id: 'site.uiSounds',
+    category: 'site',
+    name: 'Hover and click sounds',
+    description: 'Plays a short sound when you hover or click buttons and links. Pick a sound pack from the list.',
+    default: false,
+    options: [
+      { key: 'pack', label: 'Sound pack', type: 'select', choices: Object.entries(soundPacks).map(([key, pack]) => [key, pack.label]), default: 'csgo' },
+      { key: 'hover', label: 'Play on hover', type: 'toggle', default: true },
+      { key: 'click', label: 'Play on click', type: 'toggle', default: true },
+      { key: 'volume', label: 'Volume', type: 'number', min: 0, max: 100, step: 5, default: 50 }
+    ],
+    run(ctx) {
+      const targets = 'a[href], button, summary, select, label, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], input[type="checkbox"], input[type="radio"], input[type="submit"]';
+      let audio = null;
+      let noise = null;
+      let hovered = null;
+      let lastHover = 0;
+      const play = kind => {
+        const pack = soundPacks[ctx.option('pack')] || soundPacks.csgo;
+        const volume = Math.min(Math.max(Number(ctx.option('volume')) || 0, 0), 100) / 100;
+        if (!volume) return;
+        if (!audio) {
+          audio = new AudioContext();
+          noise = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
+          const samples = noise.getChannelData(0);
+          for (let i = 0; i < samples.length; i += 1) samples[i] = Math.random() * 2 - 1;
+        }
+        if (audio.state === 'suspended') audio.resume().catch(() => {});
+        const start = audio.currentTime + 0.005;
+        for (const part of pack[kind]) {
+          const at = start + (part.delay || 0);
+          const gain = audio.createGain();
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.exponentialRampToValueAtTime(part.gain * volume, at + 0.003);
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + part.length);
+          gain.connect(audio.destination);
+          let source;
+          if (part.noise) {
+            source = audio.createBufferSource();
+            source.buffer = noise;
+            const filter = audio.createBiquadFilter();
+            filter.type = part.noise;
+            filter.frequency.value = part.freq;
+            source.connect(filter).connect(gain);
+          } else {
+            source = audio.createOscillator();
+            source.type = part.wave;
+            source.frequency.setValueAtTime(part.from, at);
+            if (part.to) source.frequency.exponentialRampToValueAtTime(part.to, at + part.length);
+            source.connect(gain);
+          }
+          source.addEventListener('ended', () => gain.disconnect(), { once: true });
+          source.start(at);
+          source.stop(at + part.length + 0.02);
+        }
+      };
+      document.addEventListener('pointerover', event => {
+        if (event.pointerType !== 'mouse' || !Rk.isEnabled(ctx.id) || !ctx.option('hover')) return;
+        const target = event.target instanceof Element ? event.target.closest(targets) : null;
+        if (target === hovered) return;
+        hovered = target;
+        if (!target || !navigator.userActivation.hasBeenActive) return;
+        const now = performance.now();
+        if (now - lastHover < 45) return;
+        lastHover = now;
+        play('hover');
+      }, true);
+      document.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || !Rk.isEnabled(ctx.id) || !ctx.option('click')) return;
+        if (event.target instanceof Element && event.target.closest(targets)) play('click');
+      }, true);
+      Rk.onSettings(() => {
+        if (Rk.isEnabled(ctx.id) || !audio) return;
+        audio.close().catch(() => {});
+        audio = null;
+      });
+    }
+  });
+
+  const starfield = (count, size, seed) => {
+    const stars = [];
+    let value = seed;
+    for (let i = 0; i < count; i += 1) {
+      value = (value * 9301 + 49297) % 233280;
+      const x = Math.round((value / 233280) * size);
+      value = (value * 9301 + 49297) % 233280;
+      const y = Math.round((value / 233280) * size);
+      const radius = i % 7 === 0 ? 1.5 : 1;
+      const alpha = (0.45 + (i % 5) * 0.12).toFixed(2);
+      stars.push(`radial-gradient(${radius}px ${radius}px at ${x}px ${y}px, rgba(255, 255, 255, ${alpha}), transparent)`);
+    }
+    return stars.join(',\n');
+  };
+
+  const backgroundThemes = {
+    space: {
+      label: 'Space',
+      stars: 'dense',
+      background: 'radial-gradient(ellipse at 50% 120%, #1b2440 0%, #070912 60%, #030409 100%)'
+    },
+    universe: {
+      label: 'Universe',
+      stars: 'dense',
+      background: 'radial-gradient(circle at 20% 30%, rgba(124, 58, 237, 0.35), transparent 45%), radial-gradient(circle at 80% 20%, rgba(236, 72, 153, 0.25), transparent 40%), radial-gradient(circle at 60% 85%, rgba(14, 165, 233, 0.25), transparent 45%), #05040d'
+    },
+    galaxy: {
+      label: 'Galaxy',
+      stars: 'dense',
+      background: 'radial-gradient(ellipse 70% 25% at 50% 50%, rgba(255, 214, 170, 0.18), rgba(129, 90, 213, 0.18) 40%, transparent 70%), #04030a'
+    },
+    midnight: {
+      label: 'Midnight',
+      stars: 'light',
+      background: 'radial-gradient(circle at 50% 0%, #1e293b, #020617 70%)'
+    },
+    aurora: {
+      label: 'Aurora',
+      stars: 'light',
+      background: 'radial-gradient(ellipse 80% 40% at 30% 0%, rgba(16, 185, 129, 0.35), transparent 70%), radial-gradient(ellipse 60% 35% at 75% 10%, rgba(56, 189, 248, 0.3), transparent 70%), linear-gradient(#04121a, #020608)'
+    },
+    synthwave: {
+      label: 'Synthwave',
+      stars: 'light',
+      grid: true,
+      background: 'radial-gradient(ellipse 60% 30% at 50% 100%, rgba(255, 64, 160, 0.35), transparent 70%), linear-gradient(#0d0221 0%, #261447 60%, #2e1065 100%)'
+    },
+    ocean: {
+      label: 'Deep ocean',
+      background: 'radial-gradient(ellipse 70% 40% at 50% 0%, rgba(56, 189, 248, 0.22), transparent 70%), linear-gradient(#0a2a43 0%, #06192b 50%, #030b14 100%)'
+    },
+    sunset: {
+      label: 'Sunset',
+      background: 'linear-gradient(#1a0b2e 0%, #3d1540 45%, #6b2a45 75%, #8f4140 100%)'
+    },
+    ember: {
+      label: 'Ember',
+      background: 'radial-gradient(ellipse at 50% 110%, rgba(239, 68, 68, 0.45), transparent 60%), radial-gradient(circle at 20% 100%, rgba(249, 115, 22, 0.3), transparent 50%), #0c0503'
+    },
+    forest: {
+      label: 'Forest',
+      background: 'radial-gradient(ellipse 80% 50% at 50% 100%, rgba(34, 197, 94, 0.18), transparent 70%), linear-gradient(#071a12, #030d09)'
+    },
+    sakura: {
+      label: 'Sakura',
+      background: 'radial-gradient(circle at 15% 20%, rgba(244, 114, 182, 0.25), transparent 45%), radial-gradient(circle at 85% 80%, rgba(251, 207, 232, 0.12), transparent 45%), #160a12'
+    },
+    terminal: {
+      label: 'Terminal',
+      background: 'repeating-linear-gradient(rgba(0, 255, 70, 0.04) 0 1px, transparent 1px 4px), radial-gradient(ellipse at 50% 50%, rgba(0, 255, 70, 0.12), transparent 70%), #000000'
+    }
+  };
+
+  const denseStars = starfield(40, 300, 7);
+  const twinkleStars = starfield(18, 470, 31);
+
+  Rk.feature({
+    id: 'site.backgroundTheme',
+    category: 'site',
+    name: 'Background theme',
+    description: 'Puts a themed background like space, universe or aurora behind the site. Works with the dark theme.',
+    default: false,
+    options: [
+      { key: 'theme', label: 'Theme', type: 'select', choices: Object.entries(backgroundThemes).map(([key, theme]) => [key, theme.label]), default: 'space' }
+    ],
+    css: ctx => {
+      const theme = backgroundThemes[ctx.option('theme')] || backgroundThemes.space;
+      const root = 'html:has(> body.dark-theme)';
+      const stars = theme.stars ? `
+        ${root}::before {
+          content: '';
+          position: fixed;
+          left: 0;
+          right: 0;
+          top: -300px;
+          height: calc(100vh + 300px);
+          z-index: -1;
+          pointer-events: none;
+          background-image: ${denseStars};
+          background-size: 300px 300px;
+          opacity: ${theme.stars === 'dense' ? 1 : 0.5};
+          will-change: transform;
+          animation: rk-site-drift 120s linear infinite;
+        }
+        @keyframes rk-site-drift {
+          to {
+            transform: translateY(300px);
+          }
+        }
+      ` : '';
+      const twinkle = theme.stars === 'dense' && !theme.grid ? `
+        ${root}::after {
+          content: '';
+          position: fixed;
+          inset: 0;
+          z-index: -1;
+          pointer-events: none;
+          background-image: ${twinkleStars};
+          background-size: 470px 470px;
+          animation: rk-site-twinkle 5s ease-in-out infinite alternate;
+        }
+        @keyframes rk-site-twinkle {
+          from {
+            opacity: 0.25;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+      ` : '';
+      const grid = theme.grid ? `
+        ${root}::after {
+          content: '';
+          position: fixed;
+          left: -50%;
+          right: -50%;
+          bottom: -10vh;
+          height: 55vh;
+          z-index: -1;
+          pointer-events: none;
+          background-image: linear-gradient(rgba(255, 64, 160, 0.4) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 64, 160, 0.4) 1px, transparent 1px);
+          background-size: 60px 60px;
+          transform: perspective(400px) rotateX(62deg);
+          transform-origin: 50% 100%;
+          -webkit-mask-image: linear-gradient(transparent, #000000 70%);
+          mask-image: linear-gradient(transparent, #000000 70%);
+          animation: rk-site-grid 3s linear infinite;
+        }
+        @keyframes rk-site-grid {
+          to {
+            background-position: 0 60px;
+          }
+        }
+      ` : '';
+      return `
+        ${root} {
+          background: ${theme.background} !important;
+          background-attachment: fixed !important;
+        }
+        html body.dark-theme,
+        html body.dark-theme #wrap,
+        html body.dark-theme #container-main,
+        html body.dark-theme .container-main {
+          background: transparent !important;
+        }
+        ${stars}
+        ${twinkle}
+        ${grid}
+        @media (prefers-reduced-motion: reduce) {
+          ${root}::before,
+          ${root}::after {
+            animation: none;
+          }
+        }
+      `;
+    }
+  });
+
   Rk.feature({
     id: 'site.fontSmoothing',
     category: 'site',
