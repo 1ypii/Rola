@@ -304,6 +304,8 @@
       list,
       foot
     );
+    const mascot = el('div', { class: 'rk-mascot' });
+    mascot.innerHTML = mascotSvg;
     const dialog = el('div', { class: 'rk-settings', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Rola settings', tabindex: '-1' },
       el('div', { class: 'rk-settings-titlebar' },
         el('span', null, 'Rola Settings'),
@@ -313,13 +315,12 @@
         el('div', { class: 'rk-settings-brand' }, el('span', { class: 'rk-settings-brand-name' }, 'Rola')),
         el('div', { class: 'rk-settings-search' }, icon('search', 16), search),
         nav,
+        mascot,
         el('div', { class: 'rk-settings-side-footer' }, total, el('label', { class: 'rk-settings-theme' }, el('span', null, 'Theme'), themePicker))
       ),
       main
     );
-    const mascot = el('div', { class: 'rk-mascot' });
-    mascot.innerHTML = mascotSvg;
-    const frame = el('div', { class: `rk-settings-frame${theme === 'sakura' ? ' rk-sakura' : ''}` }, dialog, mascot);
+    const frame = el('div', { class: `rk-settings-frame${theme === 'sakura' ? ' rk-sakura' : ''}` }, dialog);
     const backdrop = el('div', { class: 'rk-modal-backdrop', onmousedown: event => {
       if (event.target === backdrop) close();
     } }, frame);

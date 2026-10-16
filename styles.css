@@ -1137,7 +1137,6 @@
   --rk-radius: 4px;
   --rk-radius-l: 6px;
   --rk-shadow: 0 18px 44px rgba(214, 70, 140, 0.28), 0 2px 8px rgba(214, 70, 140, 0.16);
-  padding-right: 140px;
 }
 
 .rk-modal-backdrop:has(> .rk-sakura) {
@@ -1146,7 +1145,6 @@
 
 .rk-sakura .rk-settings {
   grid-template-rows: auto 1fr;
-  width: min(1040px, calc(100vw - 172px));
   border: 2px solid #ff7eb6;
 }
 
@@ -1245,11 +1243,12 @@
 }
 
 .rk-sakura .rk-mascot {
-  position: absolute;
-  right: 0;
-  bottom: -6px;
-  display: block;
-  width: 150px;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
   opacity: 0;
   transform: translateY(24px);
   transition: opacity 360ms ease 120ms, transform 520ms var(--rk-ease) 120ms;
@@ -1263,8 +1262,15 @@
 
 .rk-mascot svg {
   display: block;
+  width: auto;
+  height: 100%;
+  max-height: 300px;
   overflow: visible;
   pointer-events: auto;
+}
+
+.rk-sakura .rk-settings-side-footer {
+  margin-top: 0;
 }
 
 .rk-mascot-figure {
@@ -1322,14 +1328,6 @@
 }
 
 @media (max-width: 760px) {
-  .rk-sakura {
-    padding-right: 0;
-  }
-
-  .rk-sakura .rk-settings {
-    width: min(1040px, calc(100vw - 32px));
-  }
-
   .rk-sakura .rk-mascot,
   .rk-settings-side-footer {
     display: none;
