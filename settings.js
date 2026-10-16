@@ -2,6 +2,7 @@
   const { el, ui, icon } = Rk;
 
   let panel = null;
+  let dragOffset = { x: 0, y: 0 };
   let activeCategory = Rk.categories[0].id;
   let lastScroll = 0;
   let query = '';
@@ -42,7 +43,59 @@
     ['line', 'Lines', '--rk-border', '#f6b0cf']
   ];
 
+  const themeFlags = [
+    ['showMascot', 'Show mascot image', true],
+    ['glow', 'Window glow', false],
+    ['grid', 'Grid background', false],
+    ['sweep', 'Title bar light sweep', false],
+    ['upper', 'Uppercase titles', false],
+    ['hoverGlow', 'Glow on hover', false]
+  ];
+
+  const themeFonts = {
+    default: ['Roblox', ''],
+    rounded: ['Rounded', 'ui-rounded, "SF Pro Rounded", system-ui, sans-serif'],
+    system: ['System', 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'],
+    mono: ['Monospace', 'ui-monospace, SFMono-Regular, Consolas, monospace'],
+    serif: ['Serif', 'Georgia, "Times New Roman", serif']
+  };
+
+  const defaultStyle = { showMascot: true, glow: false, grid: false, sweep: false, upper: false, hoverGlow: false, radius: 6, font: 'default' };
+
+  const builtInThemes = {
+    sakura: {
+      name: 'Sakura',
+      colors: Object.fromEntries(themeFields.map(([key, , , fallback]) => [key, fallback])),
+      mascot: '',
+      style: defaultStyle
+    },
+    futuristic: {
+      name: 'Futuristic',
+      colors: {
+        title: '#0a1424',
+        titleText: '#5ef2ff',
+        border: '#22d3ee',
+        bg: '#070b14',
+        surface: '#0b1322',
+        card: '#0d1828',
+        input: '#060a12',
+        accent: '#22d3ee',
+        heading: '#e6fbff',
+        text: '#b6c8d9',
+        muted: '#6b85a0',
+        line: '#1c3a52'
+      },
+      mascot: '',
+      style: { ...defaultStyle, showMascot: false, glow: true, grid: true, sweep: true, upper: true, hoverGlow: true }
+    }
+  };
+
   const isColor = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+
+  const luminance = hex => {
+    const [r, g, b] = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
 
   const cleanTheme = raw => {
     if (!raw || typeof raw !== 'object' || !raw.colors || typeof raw.colors !== 'object') return null;
@@ -51,7 +104,12 @@
     const colors = {};
     for (const [key, , , fallback] of themeFields) colors[key] = isColor(raw.colors[key]) ? raw.colors[key].toLowerCase() : fallback;
     const mascot = typeof raw.mascot === 'string' && raw.mascot.trim() ? directImageLink(raw.mascot.trim()) || '' : '';
-    return { name, colors, mascot };
+    const source = raw.style && typeof raw.style === 'object' ? raw.style : {};
+    const style = {};
+    for (const [key, , fallback] of themeFlags) style[key] = typeof source[key] === 'boolean' ? source[key] : fallback;
+    style.radius = Number.isInteger(source.radius) && source.radius >= 0 && source.radius <= 16 ? source.radius : defaultStyle.radius;
+    style.font = Object.hasOwn(themeFonts, source.font) ? source.font : defaultStyle.font;
+    return { name, colors, mascot, style };
   };
 
   const savedThemes = () => {
@@ -63,30 +121,20 @@
     }).filter(Boolean);
   };
 
-  const futuristicColors = {
-    title: '#0a1424',
-    titleText: '#5ef2ff',
-    border: '#22d3ee',
-    bg: '#070b14',
-    surface: '#0b1322',
-    card: '#0d1828',
-    input: '#060a12',
-    accent: '#22d3ee',
-    heading: '#e6fbff',
-    text: '#b6c8d9',
-    muted: '#6b85a0',
-    line: '#1c3a52'
-  };
-
-  const themeChoices = () => [['sakura', 'Sakura'], ['futuristic', 'Futuristic'], ['classic', 'Classic'], ...savedThemes().map(item => [item.id, item.name])];
+  const themeChoices = () => [
+    ...Object.entries(builtInThemes).map(([id, item]) => [id, item.name]),
+    ['classic', 'Classic'],
+    ...savedThemes().map(item => [item.id, item.name])
+  ];
 
   let theme = Rk.store.get('settings.theme', 'sakura');
   if (!themeChoices().some(([id]) => id === theme)) theme = 'sakura';
 
   const activeTheme = () => savedThemes().find(item => item.id === theme) || null;
+  const currentTheme = () => builtInThemes[theme] || activeTheme();
 
   const themeCode = item => {
-    const bytes = new TextEncoder().encode(JSON.stringify({ name: item.name, colors: item.colors, mascot: item.mascot }));
+    const bytes = new TextEncoder().encode(JSON.stringify({ name: item.name, colors: item.colors, mascot: item.mascot, style: item.style }));
     return `rola-theme:${btoa(String.fromCharCode(...bytes))}`;
   };
 
@@ -101,11 +149,21 @@
     }
   };
 
-  const applyTheme = (frame, colors) => {
-    const custom = colors || (theme === 'futuristic' ? futuristicColors : (activeTheme() || {}).colors);
-    frame.classList.toggle('rk-sakura', Boolean(colors) || theme !== 'classic');
-    frame.classList.toggle('rk-futuristic', !colors && theme === 'futuristic');
-    frame.style.cssText = custom ? themeFields.map(([key, , variable]) => `${variable}: ${custom[key]}`).join('; ') : '';
+  const applyTheme = (frame, preview) => {
+    const item = preview || currentTheme();
+    frame.className = 'rk-settings-frame';
+    frame.style.cssText = '';
+    if (!item) return;
+    frame.classList.add('rk-sakura');
+    for (const [key] of themeFlags) frame.classList.toggle(`rk-fx-${key}`, item.style[key]);
+    const dark = luminance(item.colors.bg) < 0.4;
+    frame.classList.toggle('rk-fx-dark', dark);
+    for (const [key, , variable] of themeFields) frame.style.setProperty(variable, item.colors[key]);
+    frame.style.setProperty('--rk-accent-text', luminance(item.colors.accent) > 0.6 ? '#0b0b0f' : '#ffffff');
+    frame.style.setProperty('--rk-radius-l', `${item.style.radius}px`);
+    frame.style.setProperty('--rk-radius', `${Math.round(item.style.radius * 0.66)}px`);
+    const font = themeFonts[item.style.font][1];
+    if (font) frame.style.setProperty('--rk-font', font);
   };
 
   const mascotUrl = () => {
@@ -159,7 +217,7 @@
     if (!panel) return;
     panel.themePicker.replaceChildren(...themeChoices().map(([value, label]) => el('option', { value }, label)));
     panel.themePicker.value = theme;
-    panel.themeEdit.textContent = activeTheme() ? 'Edit' : 'Make your own';
+    panel.themeEdit.textContent = activeTheme() ? 'Edit theme' : 'New theme';
     applyTheme(panel.frame);
     panel.mascot.firstChild.src = mascotUrl();
   };
@@ -167,16 +225,16 @@
   const editTheme = () => {
     if (!panel) return;
     const editing = activeTheme();
-    const base = editing || { name: 'My theme', colors: theme === 'futuristic' ? futuristicColors : Object.fromEntries(themeFields.map(([key, , , fallback]) => [key, fallback])), mascot: '' };
-    const draft = { name: base.name, colors: { ...base.colors }, mascot: base.mascot };
+    const base = editing || builtInThemes[theme] || builtInThemes.sakura;
+    const draft = { name: editing ? base.name : 'My theme', colors: { ...base.colors }, mascot: base.mascot, style: { ...base.style } };
     let saved = false;
     const preview = () => {
-      if (panel) applyTheme(panel.frame, draft.colors);
+      if (panel) applyTheme(panel.frame, draft);
     };
     const nameField = ui.input({ value: draft.name, maxLength: 40, onInput: value => {
       draft.name = value;
     } });
-    const mascotField = ui.input({ value: draft.mascot, placeholder: 'Mascot image link, optional', maxLength: 2000, className: 'rk-theme-mascot', onInput: value => {
+    const mascotField = ui.input({ value: draft.mascot, placeholder: 'Mascot image link, empty uses the default', maxLength: 2000, className: 'rk-theme-mascot', onInput: value => {
       draft.mascot = value;
     } });
     const pickers = new Map();
@@ -190,15 +248,42 @@
       pickers.set(key, picker);
       return el('label', { class: 'rk-theme-field' }, picker, el('span', null, label));
     }));
+    const flagToggles = new Map();
+    const syncMascotField = () => mascotField.classList.toggle('rk-hidden', !draft.style.showMascot);
+    const flags = el('div', { class: 'rk-theme-grid' }, themeFlags.map(([key, label]) => {
+      const toggle = ui.toggle(draft.style[key], next => {
+        draft.style[key] = next;
+        syncMascotField();
+        preview();
+      }, { label });
+      flagToggles.set(key, toggle);
+      return el('div', { class: 'rk-theme-field' }, toggle, el('span', null, label));
+    }));
+    const fontPicker = ui.select(Object.entries(themeFonts).map(([key, [label]]) => [key, label]), draft.style.font, next => {
+      draft.style.font = next;
+      preview();
+    });
+    const radiusPicker = el('input', { type: 'range', min: '0', max: '16', step: '1', 'aria-label': 'Corner roundness' });
+    radiusPicker.value = String(draft.style.radius);
+    radiusPicker.addEventListener('input', () => {
+      draft.style.radius = Number(radiusPicker.value);
+      preview();
+    });
+    syncMascotField();
     const fill = item => {
       draft.name = item.name;
       draft.mascot = item.mascot;
+      draft.style = { ...item.style };
       nameField.value = item.name;
       mascotField.value = item.mascot;
       for (const [key, picker] of pickers) {
         draft.colors[key] = item.colors[key];
         picker.value = item.colors[key];
       }
+      for (const [key, toggle] of flagToggles) toggle.setAttribute('aria-checked', draft.style[key] ? 'true' : 'false');
+      fontPicker.value = draft.style.font;
+      radiusPicker.value = String(draft.style.radius);
+      syncMascotField();
       preview();
     };
     const copyCode = () => {
@@ -220,7 +305,7 @@
       fill(item);
       ui.toast('Theme loaded, press save to keep it', { tone: 'success' });
     };
-    const save = () => {
+    const store = asNew => {
       const clean = cleanTheme(draft);
       if (!clean) {
         ui.toast('Give the theme a name first', { tone: 'warning' });
@@ -231,16 +316,23 @@
         return;
       }
       const list = savedThemes();
-      if (!editing && list.length >= 30) {
+      const replacing = editing && !asNew ? editing : null;
+      const taken = [...Object.values(builtInThemes), { name: 'Classic' }, ...list.filter(item => !replacing || item.id !== replacing.id)]
+        .some(item => item.name.toLowerCase() === clean.name.toLowerCase());
+      if (taken) {
+        ui.toast('A theme with that name already exists, pick another name', { tone: 'warning' });
+        return;
+      }
+      if (!replacing && list.length >= 30) {
         ui.toast('You can keep up to 30 themes', { tone: 'warning' });
         return;
       }
-      const id = editing ? editing.id : `t${Date.now()}`;
-      Rk.store.set('settings.themes', editing ? list.map(item => (item.id === id ? { id, ...clean } : item)) : [...list, { id, ...clean }]);
+      const id = replacing ? replacing.id : `t${Date.now()}`;
+      Rk.store.set('settings.themes', replacing ? list.map(item => (item.id === id ? { id, ...clean } : item)) : [...list, { id, ...clean }]);
       saved = true;
       handle.close();
       setTheme(id);
-      ui.toast('Theme saved', { tone: 'success' });
+      ui.toast(`Saved ${clean.name}`, { tone: 'success' });
     };
     const remove = async () => {
       const confirmed = await ui.confirm(`"${editing.name}" will be deleted.`, { title: 'Delete theme', confirmLabel: 'Delete', danger: true });
@@ -253,12 +345,20 @@
     const removeButton = editing ? ui.button('Delete', { variant: 'ghost', onClick: remove }) : null;
     if (removeButton) removeButton.classList.add('rk-settings-reset');
     const handle = ui.modal({
-      title: editing ? 'Edit theme' : 'New theme',
-      width: 500,
+      title: editing ? `Edit ${editing.name}` : 'New theme',
+      width: 540,
       content: [
         el('label', { class: 'rk-theme-name' }, el('span', null, 'Name'), nameField),
+        el('div', { class: 'rk-theme-heading' }, 'Colors'),
         grid,
+        el('div', { class: 'rk-theme-heading' }, 'Style'),
+        flags,
         mascotField,
+        el('div', { class: 'rk-theme-row' },
+          el('label', { class: 'rk-theme-field' }, el('span', null, 'Font'), fontPicker),
+          el('label', { class: 'rk-theme-field' }, el('span', null, 'Corner roundness'), radiusPicker)
+        ),
+        el('div', { class: 'rk-theme-heading' }, 'Share'),
         el('div', { class: 'rk-inline' },
           ui.button('Copy share code', { variant: 'ghost', onClick: copyCode }),
           ui.button('Import code', { variant: 'ghost', onClick: importCode })
@@ -266,14 +366,49 @@
       ],
       actions: [
         removeButton,
+        editing ? ui.button('Save as new', { variant: 'secondary', size: 'md', onClick: () => store(true) }) : null,
         ui.button('Cancel', { variant: 'secondary', size: 'md', onClick: () => handle.close() }),
-        ui.button('Save', { variant: 'primary', size: 'md', onClick: save })
+        ui.button('Save', { variant: 'primary', size: 'md', onClick: () => store(false) })
       ].filter(Boolean),
       onClose: () => {
         if (!saved && panel) applyTheme(panel.frame);
       }
     });
     preview();
+  };
+
+  const clampOffset = (dialog, x, y) => {
+    const rect = dialog.getBoundingClientRect();
+    const left = rect.left - dragOffset.x;
+    const top = rect.top - dragOffset.y;
+    return {
+      x: Math.round(Math.min(Math.max(x, 96 - rect.width - left), window.innerWidth - 96 - left)),
+      y: Math.round(Math.min(Math.max(y, -top), window.innerHeight - 48 - top))
+    };
+  };
+
+  const moveDialog = (dialog, offset) => {
+    dragOffset = offset;
+    dialog.style.translate = offset.x || offset.y ? `${offset.x}px ${offset.y}px` : '';
+  };
+
+  const startDrag = (dialog, event) => {
+    if (event.button !== 0 || event.target.closest('button, input, select, a, label')) return;
+    event.preventDefault();
+    const startX = event.clientX - dragOffset.x;
+    const startY = event.clientY - dragOffset.y;
+    const move = moveEvent => moveDialog(dialog, clampOffset(dialog, moveEvent.clientX - startX, moveEvent.clientY - startY));
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      dialog.classList.remove('rk-settings-dragging');
+      Rk.store.set('settings.position', dragOffset);
+    };
+    dialog.classList.add('rk-settings-dragging');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
   };
 
   const categoryName = id => {
@@ -478,7 +613,7 @@
     }));
     const total = el('div');
     const themePicker = ui.select(themeChoices(), theme, setTheme);
-    const themeEdit = ui.button(activeTheme() ? 'Edit' : 'Make your own', { variant: 'ghost', onClick: editTheme });
+    const themeEdit = ui.button(activeTheme() ? 'Edit theme' : 'New theme', { variant: 'ghost', onClick: editTheme });
     const title = el('h2', { class: 'rk-settings-title' });
     const subtitle = el('p', { class: 'rk-settings-subtitle' });
     const bulk = el('div', { class: 'rk-inline' },
@@ -498,31 +633,40 @@
       reset,
       ui.button('Done', { variant: 'primary', size: 'md', onClick: close })
     );
-    const main = el('section', { class: 'rk-settings-main' },
-      el('div', { class: 'rk-settings-head' },
+    const head = el('div', { class: 'rk-settings-head' },
         el('div', null, title, subtitle),
         el('div', { class: 'rk-settings-head-actions' }, bulk, ui.button('', { variant: 'ghost', size: 'md', icon: 'close', title: 'Close', onClick: close }))
-      ),
+    );
+    const main = el('section', { class: 'rk-settings-main' },
+      head,
       list,
       foot
     );
     const mascot = buildMascot();
+    const titlebar = el('div', { class: 'rk-settings-titlebar', title: 'Drag to move, double click to center' },
+      el('span', null, 'Rola Settings'),
+      el('button', { type: 'button', class: 'rk-settings-titlebar-close', 'aria-label': 'Close', onclick: close }, icon('close', 16))
+    );
     const dialog = el('div', { class: 'rk-settings', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Rola settings', tabindex: '-1' },
-      el('div', { class: 'rk-settings-titlebar' },
-        el('span', null, 'Rola Settings'),
-        el('button', { type: 'button', class: 'rk-settings-titlebar-close', 'aria-label': 'Close', onclick: close }, icon('close', 16))
-      ),
+      titlebar,
       el('aside', { class: 'rk-settings-side' },
         el('div', { class: 'rk-settings-brand' }, el('span', { class: 'rk-settings-brand-name' }, 'Rola')),
         el('div', { class: 'rk-settings-search' }, icon('search', 16), search),
         nav,
         mascot,
-        el('div', { class: 'rk-settings-side-footer' }, total, el('div', { class: 'rk-settings-theme' }, el('span', null, 'Theme'), themePicker, themeEdit))
+        el('div', { class: 'rk-settings-side-footer' }, total, el('div', { class: 'rk-settings-theme' }, el('span', null, 'Theme'), themePicker), themeEdit)
       ),
       main
     );
     const frame = el('div', { class: 'rk-settings-frame' }, dialog);
     applyTheme(frame);
+    for (const handle of [titlebar, head]) {
+      handle.addEventListener('pointerdown', event => startDrag(dialog, event));
+      handle.addEventListener('dblclick', event => {
+        if (!event.target.closest('button, input, select, a, label')) moveDialog(dialog, { x: 0, y: 0 });
+        Rk.store.set('settings.position', dragOffset);
+      });
+    }
     const backdrop = el('div', { class: 'rk-modal-backdrop', onmousedown: event => {
       if (event.target === backdrop) close();
     } }, frame);
@@ -549,6 +693,9 @@
     updateCounts();
     document.body.append(panel.backdrop);
     panel.list.scrollTop = lastScroll;
+    const position = Rk.store.get('settings.position', null);
+    dragOffset = { x: 0, y: 0 };
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) moveDialog(panel.dialog, clampOffset(panel.dialog, position.x, position.y));
     requestAnimationFrame(() => {
       if (!panel) return;
       panel.backdrop.classList.add('rk-modal-open');
