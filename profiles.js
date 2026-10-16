@@ -640,6 +640,24 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     }
   });
 
+  const ROBLOX_BADGES = [
+    ['administrator', 'administrator', 'Administrator', 'Given to Roblox staff.', 1, 6],
+    ['veteran', 'veteran', 'Veteran', 'Has been on Roblox for over a year.', 0, 7],
+    ['friendship', 'friendship', 'Friendship', 'Has made at least 20 friends on Roblox.', 1, 0],
+    ['ambassador', 'ambassador', 'Ambassador', 'Helped keep Roblox safe as an ambassador.', 1, 1],
+    ['bloxxer', 'bloxxer', 'Bloxxer', 'Has won at least 250 battles and been knocked out fewer times.', 0, 3],
+    ['homestead', 'homestead', 'Homestead', 'Their place has been visited 100 times.', 1, 3],
+    ['bricksmith', 'bricksmith', 'Bricksmith', 'Their place has been visited 1,000 times.', 0, 4],
+    ['combatInitiation', 'combat-initiation', 'Combat Initiation', 'Has scored 10 knockouts.', 0, 2],
+    ['warrior', 'warrior', 'Warrior', 'Has scored 100 knockouts.', 1, 2],
+    ['inviter', 'inviter', 'Inviter', 'Invited friends who joined Roblox.', 0, 0],
+    ['officialModelMaker', 'official-model-maker', 'Official Model Maker', 'Made models featured by Roblox.', 1, 4],
+    ['welcomeToTheClub', 'welcome-to-the-club', 'Welcome To The Club', 'Has bought a membership.', 0, 1],
+    ['buildersClub', 'builders-club', 'Builders Club', 'Was a Builders Club member.', 0, 5],
+    ['turboBuildersClub', 'turbo-builders-club', 'Turbo Builders Club', 'Was a Turbo Builders Club member.', 1, 5],
+    ['outrageousBuildersClub', 'outrageous-builders-club', 'Outrageous Builders Club', 'Was an Outrageous Builders Club member.', 0, 6]
+  ];
+
   Rk.feature({
     id: 'profiles.robloxBadges',
     category: 'profiles',
@@ -649,17 +667,24 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     css: `${chipsCss}
 .rk-profile-chip.rk-profile-badge { padding: 4px 12px 4px 4px; }
 .rk-profile-badge[data-rk-tip]::after { width: max-content; max-width: 240px; white-space: normal; }
+.rk-profile-badge-sprite { flex: none; width: 32px !important; height: 32px !important; background-size: 64px auto !important; }
 `,
     async run() {
       const id = profileId();
       const list = id ? await safe(Rk.api.get(`https://accountinformation.roblox.com/v1/users/${id}/roblox-badges`, { cache: 60000 })) : null;
       const badges = Array.isArray(list) ? list.filter(badge => badge && typeof badge.name === 'string' && badge.name) : [];
-      if (!badges.length) return;
+      const owned = new Set(badges.map(badge => badge.name.toLowerCase()));
+      const fakes = Rk.isEnabled('profiles.fakeBadges') && await ownProfile() ? ROBLOX_BADGES.filter(([key, , name]) => Rk.option('profiles.fakeBadges', key) === true && !owned.has(name.toLowerCase())) : [];
+      if (!badges.length && !fakes.length) return;
       const chips = badges.map(badge => {
         const image = typeof badge.imageUrl === 'string' && /^https:\/\//i.test(badge.imageUrl) ? badge.imageUrl : null;
         const chip = el('div', { class: 'rk-profile-chip rk-profile-badge', tabindex: '0' }, ui.thumb(image, { size: 32 }), el('span', null, badge.name));
         return typeof badge.description === 'string' && badge.description.trim() ? ui.tip(chip, badge.description.trim()) : chip;
       });
+      for (const [, slug, name, description, column, line] of fakes) {
+        const sprite = el('span', { class: `rk-profile-badge-sprite icon-badge-${slug}`, style: { backgroundPosition: `${-32 * column}px ${-32 * line}px` } });
+        chips.push(ui.tip(el('div', { class: 'rk-profile-chip rk-profile-badge', tabindex: '0' }, sprite, el('span', null, name)), description));
+      }
       addSection('profile', ui.section('Roblox badges', el('div', { class: 'rk-profile-chips' }, chips), { className: 'rk-profile-roblox-badges' }), 8);
     }
   });
@@ -794,6 +819,211 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
       const json = id ? await safe(Rk.api.get(`https://inventory.roblox.com/v1/users/${id}/can-view-inventory`, { cache: 60000 })) : null;
       if (!json || typeof json.canView !== 'boolean') return;
       addStatus(json.canView ? el('span', { class: 'rk-profile-state rk-profile-state-public' }, 'Inventory public') : el('span', { class: 'rk-profile-state rk-profile-state-private' }, 'Inventory private'), 2);
+    }
+  });
+
+  const VALUE_TIERS = [[100000000, '100M+'], [50000000, '50M+'], [20000000, '20M+'], [10000000, '10M+'], [5000000, '5M+'], [1000000, '1M+'], [500000, '500K+'], [100000, '100K+']];
+  const RARES = [
+    ['dominus', /^Dominus\b/i, 'Dominus', 'Owns a Dominus'],
+    ['valkyrie', /\bValkyrie\b/i, 'Valkyrie', 'Owns a Valkyrie Helm'],
+    ['fedora', /Sparkle Time Fedora/i, 'Sparkle Time', 'Owns a Sparkle Time Fedora']
+  ];
+
+  const achievementFacts = id => cached(`achievements:${id}`, async () => {
+    const stored = Rk.store.get('profiles.achievements', {});
+    const saved = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+    const hit = saved[id];
+    if (hit && typeof hit === 'object' && Date.now() - hit.time < 3600000) return hit;
+    const [user, privacy, premium, friends, groups, games] = await Promise.all([
+      profileUser(),
+      safe(Rk.api.get(`https://inventory.roblox.com/v1/users/${id}/can-view-inventory`, { cache: 60000 })),
+      safe(Rk.api.get(`https://premiumfeatures.roblox.com/v1/users/${id}/validate-membership`, { cache: 60000 })),
+      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/friends/count`)),
+      groupsOf(id),
+      safe(Rk.api.paged(`https://games.roblox.com/v2/users/${id}/games?accessFilter=Public&sortOrder=Desc`, { max: 100, limit: 50 }))
+    ]);
+    if (!user) return null;
+    let value = null;
+    const rares = [];
+    if (privacy && privacy.canView === true) {
+      const [items, values] = await Promise.all([
+        safe(Rk.api.paged(`https://inventory.roblox.com/v1/users/${id}/assets/collectibles?sortOrder=Asc`, { max: 2000, limit: 100 })),
+        safe(Rk.values())
+      ]);
+      if (Array.isArray(items)) {
+        value = 0;
+        for (const item of items) {
+          if (!item || !Rk.isId(item.assetId)) continue;
+          const entry = values instanceof Map ? values.get(Number(item.assetId)) : null;
+          value += entry && entry.value > 0 ? entry.value : Math.max(0, Number(item.recentAveragePrice) || 0);
+          const name = typeof item.name === 'string' ? item.name : '';
+          for (const [key, pattern] of RARES) if (pattern.test(name) && !rares.includes(key)) rares.push(key);
+        }
+      }
+    }
+    let badges = 0;
+    let cursor = '';
+    do {
+      const json = await safe(Rk.api.get(`https://badges.roblox.com/v1/users/${id}/badges?limit=100&sortOrder=Desc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`));
+      if (!json || !Array.isArray(json.data)) break;
+      badges += json.data.length;
+      cursor = typeof json.nextPageCursor === 'string' ? json.nextPageCursor : '';
+    } while (cursor && badges < 1000);
+    const facts = {
+      time: Date.now(),
+      created: user.created,
+      verified: user.hasVerifiedBadge === true,
+      premium: premium === true || premium === 'true',
+      friends: friends && Number.isSafeInteger(friends.count) ? friends.count : 0,
+      owned: (groups || []).filter(group => group.rank === 255).reduce((most, group) => Math.max(most, Number.isFinite(group.members) ? group.members : 0), 0),
+      visits: (Array.isArray(games) ? games : []).reduce((sum, game) => sum + (game && Number(game.placeVisits) > 0 ? Number(game.placeVisits) : 0), 0),
+      badges,
+      value,
+      rares
+    };
+    const next = { ...saved, [id]: facts };
+    const ids = Object.keys(next);
+    if (ids.length > 100) ids.sort((a, b) => (next[a].time || 0) - (next[b].time || 0)).slice(0, ids.length - 100).forEach(key => delete next[key]);
+    Rk.store.set('profiles.achievements', next);
+    return facts;
+  });
+
+  const achievementList = (facts, fake) => {
+    const list = [];
+    const tier = fake.value ? VALUE_TIERS.find(([, label]) => label === fake.value) : facts.value !== null ? VALUE_TIERS.find(([min]) => facts.value >= min) : null;
+    if (tier) list.push(['value', 'robux', `${tier[1]} value`, `Collectibles worth ${tier[1]} by Rolimons values`]);
+    for (const [key, , label, tip] of RARES) {
+      if ((Array.isArray(facts.rares) && facts.rares.includes(key)) || fake[key]) list.push(['rare', 'star', label, tip]);
+    }
+    const age = accountAge(facts.created);
+    if (age && age.years >= 15) list.push(['age', 'clock', 'Legend', 'Account is 15 or more years old']);
+    else if (age && age.years >= 10) list.push(['age', 'clock', 'OG', 'Account is 10 or more years old']);
+    else if (age && age.years >= 5) list.push(['age', 'clock', 'Veteran', 'Account is 5 or more years old']);
+    if (facts.verified) list.push(['verified', 'check', 'Verified', 'Has the Roblox verified badge']);
+    if (facts.premium) list.push(['premium', 'star', 'Premium', 'Has Roblox Premium']);
+    const visits = [[1000000000, '1B+'], [100000000, '100M+'], [1000000, '1M+']].find(([min]) => facts.visits >= min);
+    if (visits) list.push(['creator', 'play', `Creator ${visits[1]}`, `Made experiences with ${visits[1]} total visits`]);
+    const members = [[1000000, '1M+'], [100000, '100K+']].find(([min]) => facts.owned >= min);
+    if (members) list.push(['community', 'users', `Owner ${members[1]}`, `Owns a community with ${members[1]} members`]);
+    if (facts.badges >= 1000) list.push(['badges', 'shield', 'Badge hunter', 'Earned 1,000 or more experience badges']);
+    if (facts.friends >= 200) list.push(['friends', 'heart', 'Popular', 'Has 200 or more friends']);
+    return list;
+  };
+
+  Rk.feature({
+    id: 'profiles.achievementBadges',
+    category: 'profiles',
+    name: 'Achievement badges',
+    description: 'Shows Rola achievement badges on profiles, like value tiers, rare items, account age and big creators. Hover a badge to see what it means.',
+    default: false,
+    pages: PROFILE,
+    css: `
+.user-profile-header:has(> .rk-profile-achievements) { flex-wrap: wrap !important; }
+.rk-profile-achievements { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; width: 100%; margin-top: 8px; font-family: var(--rk-font); font-size: 13px; font-weight: 700; line-height: 20px; }
+.rk-profile-achievements:empty { display: none; }
+.rk-profile-achievement { display: inline-flex; align-items: center; gap: 5px; color: var(--rk-accent); cursor: default; animation: rk-fade var(--rk-fast) ease both; }
+.dark-theme .rk-profile-achievement { color: #9db8ff; }
+.rk-profile-achievement-value, .rk-profile-achievement-creator { color: var(--rk-success) !important; }
+.rk-profile-achievement-rare { color: var(--rk-warning) !important; }
+.rk-profile-achievement-premium, .rk-profile-achievement-badges { color: var(--rk-text-strong) !important; }
+.rk-profile-achievement-friends { color: #e0559a !important; }
+.rk-profile-achievement[data-rk-tip]::after { width: max-content; max-width: 240px; white-space: normal; }
+`,
+    async run(ctx) {
+      const id = profileId();
+      if (!id) return;
+      const row = el('div', { class: 'rk-profile-achievements' });
+      Rk.observe('.user-profile-header', header => place(header, row, 5));
+      const facts = await achievementFacts(id);
+      if (!facts) return;
+      const own = await ownProfile();
+      const render = () => {
+        if (!Rk.isEnabled(ctx.id)) return;
+        const fake = {};
+        if (own && Rk.isEnabled('profiles.fakeBadges')) {
+          fake.value = Rk.option('profiles.fakeBadges', 'value');
+          for (const [key] of RARES) fake[key] = Rk.option('profiles.fakeBadges', key) === true;
+        }
+        row.replaceChildren(...achievementList(facts, fake).map(([kind, iconName, label, tip]) => ui.tip(el('span', { class: `rk-profile-achievement rk-profile-achievement-${kind}`, tabindex: '0' }, icon(iconName, 14), label), tip)));
+      };
+      render();
+      if (own) Rk.onSettings(render);
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.visitCounter',
+    category: 'profiles',
+    name: 'Visit counter',
+    description: 'Counts how many times you opened each profile and shows it under the name.',
+    default: false,
+    pages: PROFILE,
+    css: statusCss,
+    async run() {
+      const id = profileId();
+      if (!id || await ownProfile()) return;
+      const stored = Rk.store.get('profiles.visits', {});
+      const visits = stored && typeof stored === 'object' && !Array.isArray(stored) ? { ...stored } : {};
+      const entry = visits[id];
+      const count = (entry && Number.isSafeInteger(entry.count) && entry.count > 0 ? entry.count : 0) + 1;
+      visits[id] = { count, last: Date.now() };
+      const ids = Object.keys(visits);
+      if (ids.length > 1000) ids.sort((a, b) => ((visits[a] && visits[a].last) || 0) - ((visits[b] && visits[b].last) || 0)).slice(0, ids.length - 1000).forEach(key => delete visits[key]);
+      Rk.store.set('profiles.visits', visits);
+      addStatus(el('span', { class: 'rk-profile-state rk-profile-state-offline' }, `Visited ${fmt.plural(count, 'time')}`), 5);
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.banner',
+    category: 'profiles',
+    name: 'Profile banner',
+    description: 'Shows a banner image above your own profile. Only you can see it.',
+    default: false,
+    pages: PROFILE,
+    options: [
+      { key: 'url', label: 'Image link', type: 'text', maxLength: 500, placeholder: 'https://', default: '' },
+      { key: 'height', label: 'Height (px)', type: 'number', min: 80, max: 400, step: 10, default: 200 },
+      { key: 'position', label: 'Image focus', type: 'select', choices: [['top', 'Top'], ['center', 'Center'], ['bottom', 'Bottom']], default: 'center' }
+    ],
+    css: `
+.rk-profile-banner { position: relative; flex: 0 0 100%; width: 100%; margin: 0 0 16px; overflow: hidden; border-radius: var(--rk-radius-l); background: var(--rk-shift); transition: height var(--rk-fast) var(--rk-ease); }
+.rk-profile-banner > img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 400ms ease; }
+.rk-profile-banner > img.rk-profile-banner-loaded { opacity: 1; }
+`,
+    async run(ctx) {
+      if (!await ownProfile()) return;
+      const image = el('img', { alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
+      const banner = el('div', { class: 'rk-profile-banner rk-hidden' }, image);
+      image.addEventListener('load', () => image.classList.add('rk-profile-banner-loaded'));
+      image.addEventListener('error', () => banner.classList.add('rk-hidden'));
+      const linkOf = value => {
+        try {
+          const url = new URL(String(value || '').trim());
+          return url.protocol === 'https:' ? url.href : null;
+        } catch {
+          return null;
+        }
+      };
+      const apply = () => {
+        const href = Rk.isEnabled(ctx.id) ? linkOf(ctx.option('url')) : null;
+        banner.classList.toggle('rk-hidden', !href);
+        banner.style.height = `${ctx.option('height')}px`;
+        image.style.objectPosition = `center ${ctx.option('position')}`;
+        if (!href) {
+          image.removeAttribute('src');
+          image.classList.remove('rk-profile-banner-loaded');
+          return;
+        }
+        if (image.getAttribute('src') === href) return;
+        image.classList.remove('rk-profile-banner-loaded');
+        image.src = href;
+      };
+      apply();
+      Rk.onSettings(apply);
+      Rk.observe('.user-profile-header', header => {
+        if (banner.nextElementSibling !== header) header.before(banner);
+      });
     }
   });
 
@@ -1217,6 +1447,19 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
   });
 
   Rk.feature({
+    id: 'profiles.fakeBadges',
+    category: 'profiles',
+    name: 'Custom badges on you',
+    description: 'Shows the Roblox badges, value tier and rare items you pick on your own profile. Only you can see them. Needs Roblox badges and Achievement badges on.',
+    default: false,
+    options: [
+      { key: 'value', label: 'Value tier', type: 'select', choices: [['', 'Real value'], ...VALUE_TIERS.map(([, label]) => [label, label])], default: '' },
+      ...RARES.map(([key, , label]) => ({ key, label: `${label} owner`, type: 'toggle', default: false })),
+      ...ROBLOX_BADGES.map(([key, , name]) => ({ key, label: name, type: 'toggle', default: false }))
+    ]
+  });
+
+  Rk.feature({
     id: 'profiles.pastNameHint',
     category: 'profiles',
     name: 'Previous name hint',
@@ -1371,6 +1614,108 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
               Rk.launch.follow(userId);
             } })
           ));
+        }
+      };
+      let queued = false;
+      const schedule = () => {
+        if (queued) return;
+        queued = true;
+        queueMicrotask(() => {
+          queued = false;
+          sync();
+        });
+      };
+      const watched = new WeakSet();
+      Rk.observe(CARD, card => {
+        const list = card.closest('ul, ol') || card.parentElement;
+        if (list && !watched.has(list)) {
+          watched.add(list);
+          new MutationObserver(schedule).observe(list, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['href'] });
+        }
+        schedule();
+      });
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.favoriteFriends',
+    category: 'profiles',
+    name: 'Favorite friends',
+    description: 'Adds a star to your friend cards. Starred friends move to the front of your friends list and the home friends row.',
+    default: false,
+    pages: ['friends', 'home'],
+    css: `
+.rk-friends-starrable { position: relative; }
+.rk-friends-star { position: absolute; top: 8px; right: 8px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--rk-muted); cursor: pointer; opacity: 0; transition: opacity var(--rk-fast) ease, color var(--rk-fast) ease, transform var(--rk-fast) var(--rk-ease); }
+.rk-friends-starrable:hover > .rk-friends-star, .rk-friends-star:focus-visible, .rk-friends-star[aria-pressed="true"] { opacity: 1; }
+.rk-friends-star:hover { color: var(--rk-text-strong); }
+.rk-friends-star[aria-pressed="true"] { color: #f5b400; }
+.rk-friends-star[aria-pressed="true"] svg { fill: currentColor; }
+.rk-friends-star:active { transform: scale(0.9); }
+[data-rk-favorite] { order: -1; }
+`,
+    async run(ctx) {
+      const favorites = () => {
+        const list = Rk.store.get('friends.favorites', []);
+        return new Set((Array.isArray(list) ? list : []).filter(Rk.isId).map(Number));
+      };
+      const tileId = tile => {
+        const link = tile.querySelector('a[href*="/users/"]');
+        return link ? Rk.idFrom(link.getAttribute('href'), 'user') : null;
+      };
+      if (Rk.page().type === 'home') {
+        const marked = new Set();
+        const markTile = tile => {
+          const userId = tileId(tile);
+          tile.toggleAttribute('data-rk-favorite', Boolean(userId) && Rk.isEnabled(ctx.id) && favorites().has(userId));
+        };
+        Rk.observe('.friends-carousel-tile', tile => {
+          marked.add(tile);
+          markTile(tile);
+        });
+        Rk.onSettings(() => {
+          for (const tile of marked) {
+            if (tile.isConnected) markTile(tile);
+            else marked.delete(tile);
+          }
+        });
+        return;
+      }
+      if (!await ownFriendsPage()) return;
+      const sync = () => {
+        const starred = favorites();
+        for (const card of friendCards()) {
+          const userId = userIdNear(card);
+          const item = card.closest('li') || card;
+          item.toggleAttribute('data-rk-favorite', Boolean(userId) && starred.has(userId));
+          const target = card.querySelector('.avatar-card-container') || card;
+          let star = target.querySelector(':scope > .rk-friends-star');
+          if (!userId) {
+            if (star) star.remove();
+            continue;
+          }
+          if (!star) {
+            star = el('button', { type: 'button', class: 'rk-friends-star' }, icon('star', 16));
+            star.addEventListener('click', event => {
+              event.preventDefault();
+              event.stopPropagation();
+              const id = Number(star.dataset.userId);
+              const next = favorites();
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              Rk.store.set('friends.favorites', [...next].slice(-200));
+              sync();
+            });
+            target.classList.add('rk-friends-starrable');
+            target.append(star);
+          }
+          const on = starred.has(userId);
+          if (star.dataset.userId !== String(userId)) star.dataset.userId = String(userId);
+          if (star.getAttribute('aria-pressed') !== String(on)) {
+            star.setAttribute('aria-pressed', String(on));
+            star.setAttribute('aria-label', on ? 'Remove from favorites' : 'Add to favorites');
+            star.title = on ? 'Remove from favorites' : 'Add to favorites';
+          }
         }
       };
       let queued = false;

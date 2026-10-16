@@ -1358,26 +1358,46 @@
     }
   };
 
+  const eventSounds = {
+    toggle: [{ wave: 'sine', from: 900, to: 1200, length: 0.05, gain: 0.15 }, { wave: 'sine', from: 1500, length: 0.04, gain: 0.08, delay: 0.03 }],
+    tab: [{ wave: 'triangle', from: 700, to: 900, length: 0.06, gain: 0.12 }],
+    join: [{ wave: 'sine', from: 523, length: 0.12, gain: 0.18 }, { wave: 'sine', from: 659, length: 0.12, gain: 0.18, delay: 0.08 }, { wave: 'sine', from: 784, length: 0.22, gain: 0.18, delay: 0.16 }, { wave: 'triangle', from: 1047, length: 0.25, gain: 0.08, delay: 0.16 }],
+    error: [{ wave: 'square', from: 220, to: 180, length: 0.12, gain: 0.08 }, { wave: 'square', from: 180, to: 150, length: 0.16, gain: 0.08, delay: 0.12 }]
+  };
+
+  const typingSounds = {
+    mechanical: { label: 'Mechanical', parts: [{ noise: 'bandpass', freq: 2400, length: 0.02, gain: 0.35 }, { noise: 'lowpass', freq: 280, length: 0.035, gain: 0.35, delay: 0.008 }] },
+    typewriter: { label: 'Typewriter', parts: [{ noise: 'highpass', freq: 3200, length: 0.02, gain: 0.4 }, { noise: 'bandpass', freq: 500, length: 0.03, gain: 0.3 }] },
+    soft: { label: 'Soft', parts: [{ wave: 'sine', from: 900, length: 0.03, gain: 0.07 }] },
+    bubble: { label: 'Bubble', parts: [{ wave: 'sine', from: 500, to: 800, length: 0.04, gain: 0.12 }] }
+  };
+
   Rk.feature({
     id: 'site.uiSounds',
     category: 'site',
     name: 'Hover and click sounds',
-    description: 'Plays a short sound when you hover or click buttons and links. Pick a sound pack from the list.',
+    description: 'Plays a short sound when you hover or click buttons and links, switch tabs, flip toggles, join games or type. Pick a sound pack from the list.',
     default: false,
     options: [
       { key: 'pack', label: 'Sound pack', type: 'select', choices: Object.entries(soundPacks).map(([key, pack]) => [key, pack.label]), default: 'csgo' },
       { key: 'hover', label: 'Play on hover', type: 'toggle', default: true },
       { key: 'click', label: 'Play on click', type: 'toggle', default: true },
+      { key: 'events', label: 'Toggle, tab, join and error sounds', type: 'toggle', default: true },
+      { key: 'typing', label: 'Play when typing', type: 'toggle', default: false },
+      { key: 'typingSound', label: 'Typing sound', type: 'select', choices: Object.entries(typingSounds).map(([key, sound]) => [key, sound.label]), default: 'mechanical' },
       { key: 'volume', label: 'Volume', type: 'number', min: 0, max: 100, step: 5, default: 50 }
     ],
     run(ctx) {
-      const targets = 'a[href], button, summary, select, label, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], input[type="checkbox"], input[type="radio"], input[type="submit"]';
+      const targets = 'a[href], button, summary, select, label, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], input[type="checkbox"], input[type="radio"], input[type="submit"], .rbx-tab';
+      const toggles = 'input[type="checkbox"], input[type="radio"], [role="switch"], [role="checkbox"], .rk-toggle';
+      const tabs = '[role="tab"], .rbx-tab';
+      const typingKeys = new Set(['Backspace', 'Delete', 'Enter']);
       let audio = null;
       let noise = null;
       let hovered = null;
       let lastHover = 0;
-      const play = kind => {
-        const pack = soundPacks[ctx.option('pack')] || soundPacks.csgo;
+      const pack = () => soundPacks[ctx.option('pack')] || soundPacks.csgo;
+      const play = (parts, pitch = 1) => {
         const volume = Math.min(Math.max(Number(ctx.option('volume')) || 0, 0), 100) / 100;
         if (!volume) return;
         if (!audio) {
@@ -1388,7 +1408,7 @@
         }
         if (audio.state === 'suspended') audio.resume().catch(() => {});
         const start = audio.currentTime + 0.005;
-        for (const part of pack[kind]) {
+        for (const part of parts) {
           const at = start + (part.delay || 0);
           const gain = audio.createGain();
           gain.gain.setValueAtTime(0.0001, at);
@@ -1401,13 +1421,13 @@
             source.buffer = noise;
             const filter = audio.createBiquadFilter();
             filter.type = part.noise;
-            filter.frequency.value = part.freq;
+            filter.frequency.value = part.freq * pitch;
             source.connect(filter).connect(gain);
           } else {
             source = audio.createOscillator();
             source.type = part.wave;
-            source.frequency.setValueAtTime(part.from, at);
-            if (part.to) source.frequency.exponentialRampToValueAtTime(part.to, at + part.length);
+            source.frequency.setValueAtTime(part.from * pitch, at);
+            if (part.to) source.frequency.exponentialRampToValueAtTime(part.to * pitch, at + part.length);
             source.connect(gain);
           }
           source.addEventListener('ended', () => gain.disconnect(), { once: true });
@@ -1424,12 +1444,43 @@
         const now = performance.now();
         if (now - lastHover < 45) return;
         lastHover = now;
-        play('hover');
+        play(pack().hover);
       }, true);
       document.addEventListener('pointerdown', event => {
-        if (event.button !== 0 || !Rk.isEnabled(ctx.id) || !ctx.option('click')) return;
-        if (event.target instanceof Element && event.target.closest(targets)) play('click');
+        if (event.button !== 0 || !Rk.isEnabled(ctx.id)) return;
+        const target = event.target instanceof Element ? event.target.closest(targets) : null;
+        if (!target) return;
+        if (ctx.option('events')) {
+          const label = target.matches('button, a[href]') ? target.textContent.trim() : '';
+          if (target.matches('button.btn-common-play-game-lg') || /^(join|play)$/i.test(label)) return play(eventSounds.join);
+          if (target.closest(tabs)) return play(eventSounds.tab);
+          if (target.matches(toggles)) return play(eventSounds.toggle);
+        }
+        if (ctx.option('click')) play(pack().click);
       }, true);
+      document.addEventListener('keydown', event => {
+        if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || !Rk.isEnabled(ctx.id) || !ctx.option('typing')) return;
+        if (event.key.length !== 1 && !typingKeys.has(event.key)) return;
+        const field = event.target;
+        const typeable = field instanceof HTMLTextAreaElement
+          || (field instanceof HTMLInputElement && /^(text|search|email|url|tel|password|number)$/.test(field.type))
+          || (field instanceof HTMLElement && field.isContentEditable);
+        if (!typeable) return;
+        const sound = typingSounds[ctx.option('typingSound')] || typingSounds.mechanical;
+        play(sound.parts, 0.92 + Math.random() * 0.16);
+      }, true);
+      const playError = () => {
+        if (Rk.isEnabled(ctx.id) && ctx.option('events') && navigator.userActivation.hasBeenActive) play(eventSounds.error);
+      };
+      Rk.observe('.rk-toast-danger', playError);
+      Rk.observe('.alert-system-feedback .alert', alert => {
+        let shown = alert.classList.contains('on');
+        new MutationObserver(() => {
+          const now = alert.classList.contains('on');
+          if (now && !shown && alert.classList.contains('alert-warning')) playError();
+          shown = now;
+        }).observe(alert, { attributes: true, attributeFilter: ['class'] });
+      });
       Rk.onSettings(() => {
         if (Rk.isEnabled(ctx.id) || !audio) return;
         audio.close().catch(() => {});
@@ -1613,6 +1664,478 @@
           }
         }
       `;
+    }
+  });
+
+  const random = (min, max) => min + Math.random() * (max - min);
+
+  const ambientEffects = {
+    snow: {
+      label: 'Snow',
+      count: 90,
+      make: (width, height, scatter) => ({ x: random(0, width), y: scatter ? random(0, height) : -8, size: random(1, 3.2), speed: random(0.35, 1.1), sway: random(0, 6.28), alpha: random(0.45, 0.9) }),
+      move: (flake, step, width, height) => {
+        flake.y += flake.speed * step;
+        flake.sway += 0.012 * step;
+        flake.x += Math.sin(flake.sway) * 0.35 * step;
+        return flake.y < height + 8;
+      },
+      draw: (context, flake) => {
+        context.globalAlpha = flake.alpha;
+        context.fillStyle = '#ffffff';
+        context.beginPath();
+        context.arc(flake.x, flake.y, flake.size, 0, 6.283);
+        context.fill();
+      }
+    },
+    rain: {
+      label: 'Rain',
+      count: 120,
+      make: (width, height, scatter) => ({ x: random(-60, width), y: scatter ? random(0, height) : random(-60, -10), length: random(10, 22), speed: random(9, 15), alpha: random(0.15, 0.35) }),
+      move: (drop, step, width, height) => {
+        drop.y += drop.speed * step;
+        drop.x += drop.speed * 0.12 * step;
+        return drop.y < height + 30;
+      },
+      draw: (context, drop) => {
+        context.globalAlpha = drop.alpha;
+        context.strokeStyle = '#a8c6ff';
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(drop.x, drop.y);
+        context.lineTo(drop.x + drop.length * 0.12, drop.y + drop.length);
+        context.stroke();
+      }
+    },
+    particles: {
+      label: 'Floating particles',
+      count: 70,
+      make: (width, height, scatter) => ({ x: random(0, width), y: scatter ? random(0, height) : height + 8, size: random(0.8, 2), speed: random(0.15, 0.5), drift: random(-0.15, 0.15), alpha: random(0.2, 0.6) }),
+      move: (dot, step) => {
+        dot.y -= dot.speed * step;
+        dot.x += dot.drift * step;
+        return dot.y > -8;
+      },
+      draw: (context, dot) => {
+        context.globalAlpha = dot.alpha;
+        context.fillStyle = '#9db8ff';
+        context.beginPath();
+        context.arc(dot.x, dot.y, dot.size, 0, 6.283);
+        context.fill();
+      }
+    },
+    fireflies: {
+      label: 'Fireflies',
+      count: 28,
+      make: (width, height) => ({ x: random(0, width), y: random(0, height), vx: random(-0.3, 0.3), vy: random(-0.3, 0.3), size: random(1.5, 2.6), pulse: random(0, 6.28), life: random(600, 1400) }),
+      move: (fly, step, width, height) => {
+        fly.pulse += 0.03 * step;
+        fly.vx = Math.min(Math.max(fly.vx + random(-0.02, 0.02) * step, -0.5), 0.5);
+        fly.vy = Math.min(Math.max(fly.vy + random(-0.02, 0.02) * step, -0.5), 0.5);
+        fly.x += fly.vx * step;
+        fly.y += fly.vy * step;
+        fly.life -= step;
+        return fly.life > 0 && fly.x > -20 && fly.x < width + 20 && fly.y > -20 && fly.y < height + 20;
+      },
+      draw: (context, fly) => {
+        const glow = 0.5 + Math.sin(fly.pulse) * 0.5;
+        context.fillStyle = '#d9ff7a';
+        context.globalAlpha = 0.15 * glow;
+        context.beginPath();
+        context.arc(fly.x, fly.y, fly.size * 4, 0, 6.283);
+        context.fill();
+        context.globalAlpha = 0.9 * glow;
+        context.beginPath();
+        context.arc(fly.x, fly.y, fly.size, 0, 6.283);
+        context.fill();
+      }
+    },
+    sakura: {
+      label: 'Sakura petals',
+      count: 40,
+      make: (width, height, scatter) => ({ x: random(-40, width), y: scatter ? random(0, height) : -12, size: random(4, 7), speed: random(0.6, 1.4), spin: random(0, 6.28), spinSpeed: random(-0.04, 0.04), sway: random(0, 6.28), alpha: random(0.6, 0.9) }),
+      move: (petal, step, width, height) => {
+        petal.y += petal.speed * step;
+        petal.sway += 0.02 * step;
+        petal.x += (0.4 + Math.sin(petal.sway) * 0.6) * step;
+        petal.spin += petal.spinSpeed * step;
+        return petal.y < height + 12 && petal.x < width + 20;
+      },
+      draw: (context, petal) => {
+        context.globalAlpha = petal.alpha;
+        context.fillStyle = '#ffb7d5';
+        context.beginPath();
+        context.ellipse(petal.x, petal.y, petal.size, petal.size * 0.55, petal.spin, 0, 6.283);
+        context.fill();
+      }
+    },
+    embers: {
+      label: 'Embers',
+      count: 60,
+      make: (width, height, scatter) => ({ x: random(0, width), y: scatter ? random(0, height) : height + 6, size: random(0.8, 2), speed: random(0.4, 1.1), sway: random(0, 6.28), flicker: random(0, 6.28) }),
+      move: (ember, step) => {
+        ember.y -= ember.speed * step;
+        ember.sway += 0.02 * step;
+        ember.flicker += 0.15 * step;
+        ember.x += Math.sin(ember.sway) * 0.4 * step;
+        return ember.y > -8;
+      },
+      draw: (context, ember) => {
+        context.globalAlpha = 0.45 + Math.sin(ember.flicker) * 0.35;
+        context.fillStyle = '#ff9a3c';
+        context.beginPath();
+        context.arc(ember.x, ember.y, ember.size, 0, 6.283);
+        context.fill();
+      }
+    }
+  };
+
+  Rk.feature({
+    id: 'site.ambientEffects',
+    category: 'site',
+    name: 'Animated effects',
+    description: 'Adds falling snow, rain, particles, fireflies, petals or embers over the site.',
+    default: false,
+    options: [
+      { key: 'effect', label: 'Effect', type: 'select', choices: Object.entries(ambientEffects).map(([key, effect]) => [key, effect.label]), default: 'snow' },
+      { key: 'density', label: 'Amount', type: 'select', choices: [['low', 'Low'], ['normal', 'Normal'], ['high', 'High']], default: 'normal' }
+    ],
+    css: `
+      .rk-site-ambient {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 999;
+        pointer-events: none;
+      }
+    `,
+    run(ctx) {
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const amounts = { low: 0.5, normal: 1, high: 2 };
+      let canvas = null;
+      let context = null;
+      let effect = null;
+      let items = [];
+      let filled = '';
+      let frame = 0;
+      let last = 0;
+      let width = 0;
+      let height = 0;
+      const resize = () => {
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      };
+      const tick = now => {
+        frame = requestAnimationFrame(tick);
+        const step = last ? Math.min((now - last) / 16.67, 3) : 1;
+        last = now;
+        context.clearRect(0, 0, width, height);
+        for (let i = 0; i < items.length; i += 1) {
+          if (!effect.move(items[i], step, width, height)) items[i] = effect.make(width, height, false);
+          effect.draw(context, items[i]);
+        }
+        context.globalAlpha = 1;
+      };
+      const stop = () => {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        last = 0;
+      };
+      const sync = () => {
+        if (!Rk.isEnabled(ctx.id) || reduce.matches) {
+          stop();
+          if (!canvas) return;
+          canvas.remove();
+          canvas = null;
+          items = [];
+          filled = '';
+          window.removeEventListener('resize', resize);
+          return;
+        }
+        if (!canvas) {
+          canvas = el('canvas', { class: 'rk-site-ambient', 'aria-hidden': 'true' });
+          context = canvas.getContext('2d');
+          document.body.append(canvas);
+          window.addEventListener('resize', resize);
+          resize();
+        }
+        const key = `${ctx.option('effect')}|${ctx.option('density')}`;
+        if (key !== filled) {
+          filled = key;
+          effect = ambientEffects[ctx.option('effect')] || ambientEffects.snow;
+          const area = Math.min(Math.max((width * height) / 2073600, 0.4), 1.5);
+          const count = Math.round(effect.count * (amounts[ctx.option('density')] || 1) * area);
+          items = Array.from({ length: count }, () => effect.make(width, height, true));
+        }
+        if (document.hidden) stop();
+        else if (!frame) frame = requestAnimationFrame(tick);
+      };
+      Rk.waitFor('body').then(() => {
+        sync();
+        Rk.onSettings(sync);
+        document.addEventListener('visibilitychange', sync);
+        reduce.addEventListener('change', sync);
+      });
+    }
+  });
+
+  Rk.feature({
+    id: 'site.customBackground',
+    category: 'site',
+    name: 'Custom background image',
+    description: 'Uses an image link of your choice as the site background, with blur and dimming. Works with the dark theme.',
+    default: false,
+    options: [
+      { key: 'url', label: 'Image link (https)', type: 'text', maxLength: 500, placeholder: 'https://', default: '' },
+      { key: 'blur', label: 'Blur', type: 'number', min: 0, max: 30, step: 1, default: 0 },
+      { key: 'dim', label: 'Dim (percent)', type: 'number', min: 0, max: 90, step: 5, default: 40 }
+    ],
+    css: ctx => {
+      let target;
+      try {
+        target = new URL(ctx.option('url').trim());
+      } catch {
+        return '';
+      }
+      if (target.protocol !== 'https:') return '';
+      const source = target.href.replace(/["\\\n\r]/g, char => encodeURIComponent(char));
+      const blur = Math.min(Math.max(Number(ctx.option('blur')) || 0, 0), 30);
+      const dim = Math.min(Math.max(Number(ctx.option('dim')) || 0, 0), 90) / 100;
+      return `
+        html body.dark-theme,
+        html body.dark-theme #wrap,
+        html body.dark-theme #container-main,
+        html body.dark-theme .container-main {
+          background: transparent !important;
+        }
+        html body.dark-theme::before {
+          content: '';
+          position: fixed;
+          inset: ${-blur * 2}px;
+          z-index: -1;
+          pointer-events: none;
+          background-image: linear-gradient(rgba(0, 0, 0, ${dim}), rgba(0, 0, 0, ${dim})), url("${source}");
+          background-size: cover;
+          background-position: center;
+          filter: ${blur ? `blur(${blur}px)` : 'none'};
+        }
+      `;
+    }
+  });
+
+  const cursorSvg = (svg, x, y) => `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${x} ${y}`;
+
+  const cursorStyles = {
+    arrow: { label: 'White arrow', value: cursorSvg('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M4 2l15 11.5-6.6 1 3.9 7-2.6 1.4-3.9-7.1L5 20z" fill="#ffffff" stroke="#111111" stroke-width="1.5" stroke-linejoin="round"/></svg>', 4, 2) },
+    classic: { label: 'Black arrow', value: cursorSvg('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M4 2l15 11.5-6.6 1 3.9 7-2.6 1.4-3.9-7.1L5 20z" fill="#111111" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/></svg>', 4, 2) },
+    crosshair: { label: 'Crosshair', value: cursorSvg('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M12 2v6M12 16v6M2 12h6M16 12h6" stroke="#000000" stroke-opacity="0.5" stroke-width="4"/><path d="M12 2v6M12 16v6M2 12h6M16 12h6" stroke="#4ade80" stroke-width="2"/><circle cx="12" cy="12" r="1.2" fill="#4ade80"/></svg>', 12, 12) },
+    dot: { label: 'Dot', value: cursorSvg('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4" fill="#ffffff" stroke="#111111" stroke-width="1.5"/></svg>', 8, 8) },
+    ring: { label: 'Ring', value: cursorSvg('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="#ffffff" stroke-width="2"/><circle cx="10" cy="10" r="7" fill="none" stroke="#111111" stroke-opacity="0.4" stroke-width="3.5"/><circle cx="10" cy="10" r="1.5" fill="#ffffff"/></svg>', 10, 10) }
+  };
+
+  Rk.feature({
+    id: 'site.customCursor',
+    category: 'site',
+    name: 'Custom cursor',
+    description: 'Swaps your mouse cursor for an arrow, crosshair, dot or ring, with an optional trail.',
+    default: false,
+    options: [
+      { key: 'style', label: 'Cursor', type: 'select', choices: Object.entries(cursorStyles).map(([key, style]) => [key, style.label]), default: 'arrow' },
+      { key: 'trail', label: 'Cursor trail', type: 'toggle', default: false },
+      { key: 'trailColor', label: 'Trail color', type: 'color', default: '#9db8ff' }
+    ],
+    css: ctx => {
+      const style = cursorStyles[ctx.option('style')] || cursorStyles.arrow;
+      return `
+        html,
+        body,
+        body *:not(input, textarea, [contenteditable="true"]) {
+          cursor: ${style.value}, auto !important;
+        }
+        .rk-site-trail {
+          position: fixed;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          z-index: 2147483646;
+          pointer-events: none;
+        }
+      `;
+    },
+    run(ctx) {
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const points = [];
+      let canvas = null;
+      let context = null;
+      let frame = 0;
+      const resize = () => {
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(window.innerWidth * ratio);
+        canvas.height = Math.round(window.innerHeight * ratio);
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      };
+      const draw = now => {
+        frame = 0;
+        context.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        while (points.length && now - points[0].time > 260) points.shift();
+        if (points.length < 2) return;
+        context.strokeStyle = ctx.option('trailColor');
+        context.lineCap = 'round';
+        for (let i = 1; i < points.length; i += 1) {
+          const fade = 1 - (now - points[i].time) / 260;
+          context.globalAlpha = Math.max(fade, 0) * 0.8;
+          context.lineWidth = 1 + fade * 4;
+          context.beginPath();
+          context.moveTo(points[i - 1].x, points[i - 1].y);
+          context.lineTo(points[i].x, points[i].y);
+          context.stroke();
+        }
+        context.globalAlpha = 1;
+        frame = requestAnimationFrame(draw);
+      };
+      const track = event => {
+        points.push({ x: event.clientX, y: event.clientY, time: performance.now() });
+        if (points.length > 40) points.shift();
+        if (!frame) frame = requestAnimationFrame(draw);
+      };
+      const sync = () => {
+        const active = Rk.isEnabled(ctx.id) && ctx.option('trail') && !reduce.matches;
+        if (active && !canvas) {
+          canvas = el('canvas', { class: 'rk-site-trail', 'aria-hidden': 'true' });
+          context = canvas.getContext('2d');
+          document.body.append(canvas);
+          resize();
+          window.addEventListener('resize', resize);
+          document.addEventListener('pointermove', track, { passive: true });
+        } else if (!active && canvas) {
+          cancelAnimationFrame(frame);
+          frame = 0;
+          points.length = 0;
+          canvas.remove();
+          canvas = null;
+          window.removeEventListener('resize', resize);
+          document.removeEventListener('pointermove', track);
+        }
+      };
+      Rk.waitFor('body').then(() => {
+        sync();
+        Rk.onSettings(sync);
+        reduce.addEventListener('change', sync);
+      });
+    }
+  });
+
+  Rk.feature({
+    id: 'site.glassCards',
+    category: 'site',
+    name: 'Glass cards',
+    description: 'Makes cards and sections see-through with a frosted blur so background themes show through. Works with the dark theme.',
+    default: false,
+    css: `
+      html body.dark-theme :is(.section-content, .rk-section, .rk-card) {
+        background-color: rgba(20, 22, 28, 0.55) !important;
+        -webkit-backdrop-filter: blur(14px) saturate(1.2);
+        backdrop-filter: blur(14px) saturate(1.2);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+    `
+  });
+
+  Rk.feature({
+    id: 'site.pageTransitions',
+    category: 'site',
+    name: 'Page transitions',
+    description: 'Fades the page content in softly when you open or switch pages.',
+    default: false,
+    css: `
+      .rk-site-enter {
+        animation: rk-site-fade-in 0.28s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+      }
+      @keyframes rk-site-fade-in {
+        from {
+          opacity: 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .rk-site-enter {
+          animation: none;
+        }
+      }
+    `,
+    run(ctx) {
+      const fade = node => {
+        if (!Rk.isEnabled(ctx.id)) return;
+        node.classList.remove('rk-site-enter');
+        void node.offsetWidth;
+        node.classList.add('rk-site-enter');
+        node.addEventListener('animationend', () => node.classList.remove('rk-site-enter'), { once: true });
+      };
+      Rk.observe('#container-main', fade);
+      Rk.onNavigate(() => {
+        const main = document.getElementById('container-main');
+        if (main) fade(main);
+      });
+    }
+  });
+
+  const themePresets = {
+    space: { label: 'Space', accent: '#7c8cff', font: null, background: 'space', effect: null, sounds: 'scifi', cursor: 'ring' },
+    csgo: { label: 'CS:GO', accent: '#de9b35', font: 'system', background: 'midnight', effect: null, sounds: 'csgo', cursor: 'crosshair' },
+    cozy: { label: 'Cozy', accent: '#f4a261', font: 'rounded', background: 'sunset', effect: 'fireflies', sounds: 'chill', cursor: null },
+    ocean: { label: 'Ocean', accent: '#38bdf8', font: null, background: 'ocean', effect: 'particles', sounds: 'droplet', cursor: null },
+    synthwave: { label: 'Synthwave', accent: '#ff40a0', font: null, background: 'synthwave', effect: null, sounds: 'retro', cursor: 'dot' },
+    winter: { label: 'Winter', accent: '#9db8ff', font: null, background: 'midnight', effect: 'snow', sounds: 'glass', cursor: null },
+    sakura: { label: 'Sakura', accent: '#f472b6', font: 'rounded', background: 'sakura', effect: 'sakura', sounds: 'bubble', cursor: null },
+    inferno: { label: 'Inferno', accent: '#f97316', font: null, background: 'ember', effect: 'embers', sounds: 'laser', cursor: 'crosshair' },
+    minimal: { label: 'Minimal', accent: null, font: null, background: null, effect: null, sounds: 'minimal', cursor: null }
+  };
+
+  Rk.feature({
+    id: 'site.themePresets',
+    category: 'site',
+    name: 'Theme presets',
+    description: 'Sets the accent color, font, background, effects, sounds and cursor in one go. Pick a preset to apply it, then tweak any of those features after.',
+    default: false,
+    options: [
+      { key: 'preset', label: 'Preset', type: 'select', choices: Object.entries(themePresets).map(([key, preset]) => [key, preset.label]), default: 'space' }
+    ],
+    run(ctx) {
+      const setFeature = (id, key, value) => {
+        if (value == null) {
+          Rk.setEnabled(id, false);
+          return;
+        }
+        Rk.setOption(id, key, value);
+        Rk.setEnabled(id, true);
+      };
+      const check = () => {
+        if (!Rk.isEnabled(ctx.id)) {
+          if (Rk.store.get('site.themePresets', null) !== null) Rk.store.set('site.themePresets', null);
+          return;
+        }
+        const key = ctx.option('preset');
+        const preset = themePresets[key];
+        if (!preset || Rk.store.get('site.themePresets', null) === key) return;
+        Rk.store.set('site.themePresets', key);
+        if (preset.background) {
+          Rk.setOption('site.forceTheme', 'theme', 'dark');
+          Rk.setEnabled('site.forceTheme', true);
+        }
+        setFeature('site.accentColor', 'color', preset.accent);
+        setFeature('site.fontChoice', 'font', preset.font);
+        setFeature('site.backgroundTheme', 'theme', preset.background);
+        setFeature('site.ambientEffects', 'effect', preset.effect);
+        setFeature('site.uiSounds', 'pack', preset.sounds);
+        setFeature('site.customCursor', 'style', preset.cursor);
+        Rk.setEnabled('site.glassCards', Boolean(preset.background));
+      };
+      check();
+      Rk.onSettings(check);
     }
   });
 

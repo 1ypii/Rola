@@ -1853,4 +1853,110 @@
       }));
     }
   });
+
+  Rk.feature({
+    id: 'avatar.quickOutfits',
+    category: 'avatar',
+    name: 'Quick outfit switcher',
+    description: 'Adds a button to the top bar that lets you wear one of your saved outfits from any page.',
+    default: false,
+    css: `
+      .rk-avatar-quick { min-width: 240px; max-width: 280px; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
+      .rk-avatar-quick .rk-menu-item { gap: 10px; }
+      .rk-avatar-quick .rk-menu-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rk-avatar-quick .rk-menu-item[disabled] { opacity: 0.5; pointer-events: none; }
+      .rk-avatar-quick-empty { padding: 12px; font-size: 13px; color: var(--rk-muted); }
+    `,
+    run(ctx) {
+      let outfits = null;
+      let close = null;
+      let busy = false;
+      const loadOutfits = async () => {
+        if (outfits) return outfits;
+        const user = await Rk.me();
+        if (!user) return [];
+        const json = await fetchJson(`https://avatar.roblox.com/v1/users/${user.id}/outfits?page=1&itemsPerPage=50&isEditable=true`);
+        outfits = (json && Array.isArray(json.data) ? json.data : []).filter(outfit => outfit && Rk.isId(outfit.id)).slice(0, 50);
+        return outfits;
+      };
+      const wear = async (outfit, item) => {
+        if (busy) return;
+        busy = true;
+        item.disabled = true;
+        try {
+          const details = await Rk.api.get(`https://avatar.roblox.com/v1/outfits/${outfit.id}/details`);
+          const assets = isObject(details) && Array.isArray(details.assets) ? details.assets.filter(asset => isObject(asset) && Rk.isId(asset.id)) : null;
+          if (!assets) throw new Error('unexpected outfit data');
+          const result = await Rk.api.post('https://avatar.roblox.com/v2/avatar/set-wearing-assets', { assets: assets.map(asset => (isObject(asset.meta) ? { id: Number(asset.id), meta: asset.meta } : { id: Number(asset.id) })) });
+          if (isObject(result) && result.success === false) throw new Error('wear rejected');
+          await Promise.allSettled([
+            isObject(details.bodyColors) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-body-colors', details.bodyColors) : null,
+            typeof details.playerAvatarType === 'string' ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: details.playerAvatarType }) : null,
+            isObject(details.scale) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-scales', details.scale) : null
+          ]);
+          ui.toast(`Wearing ${str(outfit.name, 100) || 'outfit'}`, { tone: 'success' });
+          if (close) close();
+        } catch {
+          ui.toast('Could not wear that outfit', { tone: 'danger' });
+        }
+        busy = false;
+        item.disabled = false;
+      };
+      const open = async anchor => {
+        if (close) {
+          close();
+          return;
+        }
+        const list = el('div', { class: 'rk-menu rk-avatar-quick', role: 'menu' }, el('div', { class: 'rk-avatar-quick-empty' }, ui.spinner(16)));
+        const onDown = event => {
+          if (!list.contains(event.target) && !anchor.contains(event.target)) close();
+        };
+        const onKey = event => {
+          if (event.key === 'Escape') close();
+        };
+        close = () => {
+          document.removeEventListener('mousedown', onDown, true);
+          document.removeEventListener('keydown', onKey, true);
+          list.classList.remove('rk-menu-open');
+          setTimeout(() => list.remove(), 180);
+          close = null;
+        };
+        document.addEventListener('mousedown', onDown, true);
+        document.addEventListener('keydown', onKey, true);
+        const place = () => {
+          const rect = anchor.getBoundingClientRect();
+          list.style.top = `${Math.round(rect.bottom + window.scrollY + 6)}px`;
+          list.style.left = `${Math.max(8, Math.round(rect.right + window.scrollX - list.offsetWidth))}px`;
+        };
+        document.body.append(list);
+        place();
+        requestAnimationFrame(() => list.classList.add('rk-menu-open'));
+        const saved = await loadOutfits();
+        if (!list.isConnected) return;
+        if (!saved.length) {
+          list.replaceChildren(el('div', { class: 'rk-avatar-quick-empty' }, 'No saved outfits yet'));
+        } else {
+          list.replaceChildren(...saved.map(outfit => {
+            const item = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem' }, ui.thumb(Rk.thumb('Outfit', outfit.id, '150x150'), { size: 36 }), el('span', null, str(outfit.name, 100) || 'Outfit'));
+            item.addEventListener('click', () => wear(outfit, item));
+            return item;
+          }));
+        }
+        place();
+      };
+      const button = ui.tip(el('a', { class: 'rk-nav-button', href: '/my/avatar', role: 'button', 'data-rk-tip-pos': 'below' }, icon('user', 22)), 'Outfits');
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        open(button);
+      });
+      const item = el('li', { class: 'navbar-icon-item rk-nav-item rk-avatar-quick-nav' }, button);
+      Rk.onSettings(() => item.classList.toggle('rk-hidden', !Rk.isEnabled(ctx.id)));
+      Rk.observe('ul.navbar-right', navbar => {
+        if (navbar.contains(item)) return;
+        const robux = [...navbar.children].find(node => node.id === 'navbar-robux' || node.querySelector('#navbar-robux'));
+        if (robux) robux.before(item);
+        else navbar.append(item);
+      });
+    }
+  });
 })();

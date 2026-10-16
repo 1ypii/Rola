@@ -439,6 +439,216 @@
     if (handle) requestAnimationFrame(() => requestAnimationFrame(() => chart.classList.add('rk-tools-time-in')));
   };
 
+  const confetti = () => {
+    if (!Rk.isEnabled('tools.confetti') || !document.body || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const scale = window.devicePixelRatio || 1;
+    const canvas = el('canvas', { class: 'rk-tools-confetti', 'aria-hidden': 'true' });
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    document.body.append(canvas);
+    const context = canvas.getContext('2d');
+    context.scale(scale, scale);
+    const colors = ['#335fff', '#00b06f', '#f7c948', '#ff5c8a', '#a970ff', '#ffffff'];
+    const pieces = Array.from({ length: 140 }, () => {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 4 + Math.random() * 9;
+      return {
+        x: width / 2,
+        y: height * 0.4,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 4,
+        size: 5 + Math.random() * 5,
+        spin: Math.random() * Math.PI,
+        turn: (Math.random() - 0.5) * 0.3,
+        color: colors[Math.floor(Math.random() * colors.length)]
+      };
+    });
+    const start = performance.now();
+    let last = start;
+    const frame = now => {
+      const step = Math.min((now - last) / 16.7, 3);
+      last = now;
+      const elapsed = now - start;
+      context.clearRect(0, 0, width, height);
+      context.globalAlpha = Math.min(1, Math.max(0, (1800 - elapsed) / 500));
+      for (const piece of pieces) {
+        piece.vx *= 0.985 ** step;
+        piece.vy = piece.vy * 0.985 ** step + 0.25 * step;
+        piece.x += piece.vx * step;
+        piece.y += piece.vy * step;
+        piece.spin += piece.turn * step;
+        context.save();
+        context.translate(piece.x, piece.y);
+        context.rotate(piece.spin);
+        context.fillStyle = piece.color;
+        context.fillRect(-piece.size / 2, -piece.size / 4, piece.size, piece.size / 2);
+        context.restore();
+      }
+      if (elapsed < 1800) requestAnimationFrame(frame);
+      else canvas.remove();
+    };
+    requestAnimationFrame(frame);
+  };
+
+  const openUnfriends = async () => {
+    const body = el('div', { class: 'rk-tools-unfriends' }, ui.spinner());
+    const handle = toggleModal('unfriends', () => ({ title: 'Unfriends', width: 480, content: body }));
+    if (!handle) return;
+    const log = await Rk.bg('unfriends').catch(() => []);
+    const entries = (Array.isArray(log) ? log : []).filter(entry => entry && Rk.isId(entry.userId));
+    if (!entries.length) {
+      body.replaceChildren(ui.empty('Nobody has unfriended you since this was turned on'));
+      return;
+    }
+    body.replaceChildren(...entries.map(entry => ui.row(
+      [
+        ui.thumb(Rk.thumb('AvatarHeadShot', entry.userId, '48x48', { circular: true }), { size: 36, round: true }),
+        el('div', { class: 'rk-tools-person' },
+          ui.link(`/users/${entry.userId}/profile`, clip(entry.displayName, 60) || `User ${entry.userId}`),
+          el('span', { class: 'rk-muted' }, [clip(entry.name, 40) ? `@${clip(entry.name, 40)}` : '', entry.banned ? 'Banned or deleted' : ''].filter(Boolean).join(' · '))
+        )
+      ],
+      el('span', { class: 'rk-muted' }, fmt.ago(entry.time))
+    )));
+  };
+
+  const playtimeGames = async () => {
+    const games = await Rk.bg('playtime').catch(() => ({}));
+    return Object.entries(isObject(games) ? games : {})
+      .filter(([id, game]) => Rk.isId(id) && isObject(game) && Number(game.minutes) >= 1)
+      .map(([id, game]) => ({
+        universeId: Number(id),
+        minutes: Math.round(game.minutes),
+        placeId: Rk.isId(game.placeId) ? Number(game.placeId) : null,
+        name: clip(game.name, 120) || `Experience ${id}`
+      }))
+      .sort((a, b) => b.minutes - a.minutes);
+  };
+
+  const openPlaytime = async () => {
+    const body = el('div', null, ui.spinner());
+    const handle = toggleModal('playtime', () => ({ title: 'Playtime', width: 520, content: body }));
+    if (!handle) return;
+    const games = await playtimeGames();
+    if (!games.length) {
+      body.replaceChildren(ui.empty('No playtime yet, it counts while you play with this turned on'));
+      return;
+    }
+    const total = games.reduce((sum, game) => sum + game.minutes, 0);
+    body.replaceChildren(
+      ui.stats([['Total', minutesLabel(total)], ['Experiences', fmt.num(games.length)], ['Most played', games[0].name]]),
+      el('div', { class: 'rk-tools-playtime' }, games.slice(0, 50).map(game => ui.row(
+        [
+          ui.thumb(Rk.thumb('GameIcon', game.universeId, '50x50'), { size: 36 }),
+          game.placeId ? ui.link(`/games/${game.placeId}`, game.name) : el('span', null, game.name)
+        ],
+        el('span', { class: 'rk-muted' }, minutesLabel(game.minutes))
+      ))),
+      el('p', { class: 'rk-tools-time-note rk-muted' }, 'Counted from your online status about once a minute, so short sessions can be missed.')
+    );
+  };
+
+  const valueTiers = [100000, 500000, 1000000, 5000000, 10000000, 20000000, 50000000, 100000000];
+  const tierLabel = amount => (amount >= 1000000 ? `${amount / 1000000}M+` : `${amount / 1000}K+`);
+
+  const achievementList = [
+    ['site-1h', 'Getting comfy', 'Spend an hour on the site', 'siteMinutes', 60],
+    ['site-10h', 'Regular', 'Spend 10 hours on the site', 'siteMinutes', 600],
+    ['site-50h', 'Always online', 'Spend 50 hours on the site', 'siteMinutes', 3000],
+    ['streak-3', 'Back again', 'Visit 3 days in a row', 'streak', 3],
+    ['streak-7', 'Weekly habit', 'Visit 7 days in a row', 'streak', 7],
+    ['streak-30', 'Dedicated', 'Visit 30 days in a row', 'streak', 30],
+    ['launch-1', 'Liftoff', 'Launch an experience', 'launches', 1],
+    ['launch-50', 'Frequent flyer', 'Launch experiences 50 times', 'launches', 50],
+    ['launch-250', 'Main character', 'Launch experiences 250 times', 'launches', 250],
+    ['play-10h', 'Grinder', 'Play for 10 hours', 'playMinutes', 600],
+    ['play-100h', 'Veteran', 'Play for 100 hours', 'playMinutes', 6000],
+    ['play-games', 'Explorer', 'Play 10 different experiences', 'playGames', 10],
+    ['profiles-25', 'People watcher', 'Visit 25 profiles', 'profiles', 25],
+    ['pins-5', 'Curator', 'Pin 5 experiences', 'pins', 5],
+    ['wishlist-10', 'Window shopper', 'Put 10 items on your wishlist', 'wishlist', 10],
+    ['servers-10', 'Server hopper', 'Join servers in 10 experiences', 'servers', 10],
+    ['notes-5', 'Note taker', 'Write 5 notes', 'notes', 5],
+    ['unfriended', 'Survivor', 'Get unfriended and keep going', 'unfriends', 1],
+    ['night-owl', 'Night owl', 'Browse between 2 and 5 at night', 'nightOwl', 1],
+    ...valueTiers.map(amount => [`value-${amount}`, `${tierLabel(amount)} value`, `Reach ${tierLabel(amount)} inventory value`, 'value', amount])
+  ].map(([id, name, description, metric, goal]) => ({ id, name, description, metric, goal }));
+
+  const streakOf = days => {
+    const seen = new Set(days);
+    let streak = 0;
+    for (let date = new Date(); seen.has(dayKey(date)); date = new Date(date.getTime() - 86400000)) streak++;
+    return streak;
+  };
+
+  const achievementStats = async saved => {
+    const [games, unfriends] = await Promise.all([
+      Rk.isEnabled('tools.playtime') ? playtimeGames() : [],
+      Rk.isEnabled('tools.unfriendAlerts') ? Rk.bg('unfriends').catch(() => []) : []
+    ]);
+    const total = values => values.reduce((sum, value) => sum + (Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 0), 0);
+    return {
+      siteMinutes: total(Object.values(record('tools.timeOnSite'))),
+      streak: streakOf(Array.isArray(saved.days) ? saved.days : []),
+      launches: total(Object.values(record('games.launches')).map(entry => isObject(entry) ? entry.count : 0)),
+      playMinutes: total(games.map(game => game.minutes)),
+      playGames: games.length,
+      profiles: list('history.profiles').length,
+      pins: list('pins.games').length,
+      wishlist: list('wishlist').length,
+      servers: Object.keys(record('servers.last')).length,
+      notes: Object.keys(record('notes.users')).length + Object.keys(record('notes.games')).length,
+      unfriends: Array.isArray(unfriends) ? unfriends.length : 0,
+      nightOwl: saved.nightOwl ? 1 : 0,
+      value: Number.isFinite(saved.value) ? saved.value : 0
+    };
+  };
+
+  const inventoryValue = async userId => {
+    const [items, values] = await Promise.all([
+      Rk.api.paged(`https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?sortOrder=Asc`, { max: 2000, limit: 100 }),
+      Rk.values()
+    ]);
+    return items.reduce((sum, item) => {
+      const entry = item ? values.get(Number(item.assetId)) : null;
+      const rap = item && Number(item.recentAveragePrice) > 0 ? Number(item.recentAveragePrice) : 0;
+      return sum + (entry && entry.value > 0 ? entry.value : rap);
+    }, 0);
+  };
+
+  const openAchievements = async () => {
+    const body = el('div', null, ui.spinner());
+    const handle = toggleModal('achievements', () => ({ title: 'Achievements', width: 640, content: body }));
+    if (!handle) return;
+    const saved = record('tools.achievements');
+    const unlocked = isObject(saved.unlocked) ? saved.unlocked : {};
+    const stats = await achievementStats(saved);
+    const tile = entry => {
+      const done = Number.isFinite(unlocked[entry.id]);
+      const current = Math.min(stats[entry.metric], entry.goal);
+      return el('div', { class: `rk-tools-ach${done ? ' rk-tools-ach-done' : ''}` },
+        el('div', { class: 'rk-tools-ach-name' }, done ? icon('check', 14) : null, entry.name),
+        el('div', { class: 'rk-tools-ach-desc' }, entry.description),
+        done ? el('div', { class: 'rk-tools-ach-desc' }, `Unlocked ${fmt.date(unlocked[entry.id])}`) : [ui.progress(current / entry.goal), el('div', { class: 'rk-tools-ach-desc' }, `${fmt.num(Math.floor(current))} of ${fmt.num(entry.goal)}`)]
+      );
+    };
+    const regular = achievementList.filter(entry => entry.metric !== 'value');
+    const tiers = achievementList.filter(entry => entry.metric === 'value');
+    const count = achievementList.filter(entry => Number.isFinite(unlocked[entry.id])).length;
+    body.replaceChildren(
+      el('p', { class: 'rk-modal-text rk-muted' }, `${fmt.num(count)} of ${fmt.num(achievementList.length)} unlocked`),
+      el('div', { class: 'rk-tools-ach-heading' }, 'Inventory value'),
+      el('div', { class: 'rk-tools-tiers' }, tiers.map(entry => ui.tip(
+        el('span', { class: `rk-tools-tier${Number.isFinite(unlocked[entry.id]) ? ' rk-tools-tier-done' : ''}` }, tierLabel(entry.goal)),
+        Number.isFinite(unlocked[entry.id]) ? `Unlocked ${fmt.date(unlocked[entry.id])}` : `${fmt.num(stats.value)} of ${fmt.num(entry.goal)}`
+      ))),
+      el('div', { class: 'rk-tools-ach-heading' }, 'Milestones'),
+      el('div', { class: 'rk-tools-ach-grid' }, regular.map(tile))
+    );
+  };
+
   let quickNotes = null;
 
   const toggleQuickNotes = () => {
@@ -541,6 +751,9 @@
     ['tools.notesManager', 'Open notes', 'note', openNotesManager, 'notes saved'],
     ['tools.timeOnSite', 'Time on Roblox', 'clock', openTimeChart, 'usage screen time chart'],
     ['tools.robuxConverter', 'Robux converter', 'robux', openConverter, 'usd dollars devex money'],
+    ['tools.playtime', 'Playtime', 'play', openPlaytime, 'hours played games stats'],
+    ['tools.achievements', 'Achievements', 'star', openAchievements, 'badges goals milestones value'],
+    ['tools.unfriendAlerts', 'Unfriends', 'users', openUnfriends, 'removed friends unfriended'],
     ['tools.quickNotes', 'Quick notes', 'edit', toggleQuickNotes, 'notepad scratch'],
     ['tools.shortcutHelp', 'Keyboard shortcuts', 'keyboard', openShortcuts, 'hotkeys keys help']
   ];
@@ -1404,6 +1617,190 @@
     options: [
       { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Default chime', default: '' }
     ]
+  });
+
+  Rk.feature({
+    id: 'tools.backgroundMusic',
+    category: 'tools',
+    name: 'Background music',
+    description: 'Loops a Roblox audio while you have the site open. It keeps playing between pages and stops when you close the last Roblox tab.',
+    default: false,
+    options: [
+      { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Roblox audio id', default: '' },
+      { key: 'volume', label: 'Volume', type: 'number', min: 0, max: 100, step: 5, default: 40 }
+    ],
+    run() {
+      Rk.bg('music').catch(() => {});
+    }
+  });
+
+  Rk.feature({
+    id: 'tools.unfriendAlerts',
+    category: 'tools',
+    name: 'Unfriend alerts',
+    description: 'Get a desktop notification when someone unfriends you, and see who in quick search.',
+    default: false,
+    css: `
+      .rk-tools-person {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+    `,
+    run: pollNow
+  });
+
+  Rk.feature({
+    id: 'tools.watchFriend',
+    category: 'tools',
+    name: 'Watch friends',
+    description: 'Get a desktop notification when the people you list join a game, switch games or go offline.',
+    default: false,
+    options: [
+      { key: 'users', label: 'Usernames or ids, separated by commas', type: 'text', maxLength: 240, placeholder: 'builderman, 156', default: '' }
+    ],
+    run: pollNow
+  });
+
+  Rk.feature({
+    id: 'tools.wishlistAlerts',
+    category: 'tools',
+    name: 'Wishlist price alerts',
+    description: 'Get a desktop notification when an item on your wishlist gets cheaper or goes on sale.',
+    default: false,
+    options: [
+      { key: 'percent', label: 'Only when it drops by at least (percent)', type: 'number', min: 0, max: 95, step: 5, default: 0 }
+    ],
+    run: pollNow
+  });
+
+  Rk.feature({
+    id: 'tools.gameUpdateAlerts',
+    category: 'tools',
+    name: 'Pinned experience updates',
+    description: 'Get a desktop notification when an experience you pinned gets updated.',
+    default: false,
+    run: pollNow
+  });
+
+  Rk.feature({
+    id: 'tools.playtime',
+    category: 'tools',
+    name: 'Playtime tracker',
+    description: 'Counts how long you play each experience. Open it from quick search.',
+    default: false,
+    run: pollNow
+  });
+
+  Rk.feature({
+    id: 'tools.confetti',
+    category: 'tools',
+    name: 'Confetti',
+    description: 'Shows a short confetti burst when you unlock an achievement or send or accept a trade.',
+    default: false,
+    css: `
+      .rk-tools-confetti {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 2147483646;
+        pointer-events: none;
+      }
+    `,
+    run() {
+      document.addEventListener('click', event => {
+        if (!Rk.isEnabled('tools.confetti') || Rk.page().type !== 'trades') return;
+        const button = event.target instanceof Element ? event.target.closest('button, a.btn-cta-md, a.btn-primary-md') : null;
+        if (!button || button.closest('.rk-section, .rk-modal-backdrop') || !button.closest('.modal, .modal-dialog, [role="dialog"]')) return;
+        if (/^(accept|send|send trade|confirm)$/i.test(button.textContent.trim())) confetti();
+      }, true);
+    }
+  });
+
+  Rk.feature({
+    id: 'tools.achievements',
+    category: 'tools',
+    name: 'Achievements',
+    description: 'Unlock Rola achievements for your playtime, streaks and inventory value, like 1M+ and 10M+. Open them from quick search.',
+    default: false,
+    css: `
+      .rk-tools-ach-heading {
+        margin: 16px 0 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--rk-text-strong);
+      }
+      .rk-tools-ach-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 10px;
+      }
+      .rk-tools-ach {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px;
+        border-radius: var(--rk-radius);
+        background: var(--rk-shift);
+        opacity: 0.6;
+      }
+      .rk-tools-ach-done {
+        opacity: 1;
+        box-shadow: inset 0 0 0 1px var(--rk-accent);
+      }
+      .rk-tools-ach-name {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 600;
+        color: var(--rk-text-strong);
+      }
+      .rk-tools-ach-desc {
+        font-size: 12px;
+        color: var(--rk-muted);
+      }
+      .rk-tools-tiers {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .rk-tools-tier {
+        padding: 6px 12px;
+        border-radius: var(--rk-radius-s);
+        border: 1px solid var(--rk-border);
+        font-weight: 700;
+        color: var(--rk-muted);
+      }
+      .rk-tools-tier-done {
+        border-color: transparent;
+        background: linear-gradient(135deg, #f7c948, #e08e0b);
+        color: #1a1200;
+      }
+    `,
+    async run(ctx) {
+      const user = await Rk.me();
+      if (!user || !Rk.isEnabled(ctx.id)) return;
+      const saved = record('tools.achievements');
+      const day = dayKey();
+      const days = (Array.isArray(saved.days) ? saved.days : []).filter(entry => typeof entry === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry) && entry !== day).slice(-364);
+      days.push(day);
+      const hour = new Date().getHours();
+      const next = { ...saved, days, nightOwl: Boolean(saved.nightOwl) || (hour >= 2 && hour < 5) };
+      if (next.valueDay !== day) {
+        next.valueDay = day;
+        const value = await inventoryValue(user.id).catch(() => null);
+        if (Number.isFinite(value)) next.value = value;
+      }
+      const unlocked = isObject(saved.unlocked) ? { ...saved.unlocked } : {};
+      const stats = await achievementStats(next);
+      const fresh = achievementList.filter(entry => !Number.isFinite(unlocked[entry.id]) && stats[entry.metric] >= entry.goal);
+      for (const entry of fresh) unlocked[entry.id] = Date.now();
+      Rk.store.set('tools.achievements', { ...record('tools.achievements'), ...next, unlocked });
+      if (!fresh.length) return;
+      ui.toast(fresh.length === 1 ? `Achievement unlocked: ${fresh[0].name}` : `${fmt.num(fresh.length)} achievements unlocked`, { tone: 'success', duration: 5000 });
+      confetti();
+    }
   });
 
   Rk.feature({

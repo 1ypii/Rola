@@ -1,10 +1,13 @@
 const SETTINGS_KEY = 'rk:settings';
+const DATA_KEY = 'rk:data';
 const VALUES_KEY = 'rkbg:values';
 const STATE_KEY = 'rkbg:state';
+const UNFRIENDS_KEY = 'rkbg:unfriends';
+const PLAYTIME_KEY = 'rkbg:playtime';
 const VALUES_URL = 'https://api.rolimons.com/items/v2/itemdetails';
 const VALUES_TTL = 10 * 60 * 1000;
 const POLL_ALARM = 'rk-poll';
-const ALERT_FEATURES = ['tools.friendOnlineAlerts', 'trading.tradeAlerts', 'trading.tradeBadge', 'tools.robuxAlerts'];
+const ALERT_FEATURES = ['tools.friendOnlineAlerts', 'trading.tradeAlerts', 'trading.tradeBadge', 'tools.robuxAlerts', 'tools.unfriendAlerts', 'tools.watchFriend', 'tools.wishlistAlerts', 'tools.gameUpdateAlerts', 'tools.playtime'];
 const NOTIFY_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAABeUlEQVR42u3dgU3DQBBE0XhFR9APlAb9QE2hARRi5c6z8b1fQHyZf7NnK5F8uQAAVmWb9cGv79frmYL6+dq29gLOFvoRMjahZ2WU8LMbcBN8tg0l/GwbSvhZCSX8rIQSflZCCT8rocSUpez+bAtK+FkJRlDnEYSQAOPnuDGkAUYQAcZPcAxpgBFEAAggAAQQgAAvXRby/Xns9d4+NCAWfuqaLQUkg+ggoVYNv8saauXwO6zFXZBDmAAQ4EGsJaMeljod+BpAAAggAAQQAAIIAAEEEAACCAABBIAAAnAwrX8R6/xLlgYQAAIIwNMK6PL//PRaatUv3mUNtXIAHTZArToCuozANg9inc4Ed0EEgAACQAABIGA1AbPeFoS/s9UAI4iAu6qC8eNHA4wg1N7KYNz4+bcBJMwN3wh6hjNAC+bt/rsbQMKc8HeNIBLGh7/7DCBhfEY1+wLCv81DYXrbxuObslIXFv6ABqzaiJEbb9oOPpsMbQcAjOYX6ZKCsgWRhdEAAAAASUVORK5CYII=';
 
 let valuesMemory = null;
@@ -87,15 +90,43 @@ const audioUrl = async assetId => {
   return target.href;
 };
 
+const hasOffscreen = async () => (await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })).length > 0;
+
+const openOffscreen = async () => {
+  try {
+    await chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['AUDIO_PLAYBACK'], justification: 'Plays notification sounds and background music' });
+  } catch {}
+};
+
 const playSound = async () => {
   const settings = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
   if (settings && settings.enabled && settings.enabled['tools.alertSound'] === false) return;
   const assetId = soundAsset(settings);
   const src = assetId ? await audioUrl(assetId).catch(() => null) : null;
-  try {
-    await chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['AUDIO_PLAYBACK'], justification: 'Plays the notification sound' });
-  } catch {}
+  await openOffscreen();
   await chrome.runtime.sendMessage({ type: 'rk-play', src }).catch(() => {});
+};
+
+const syncMusic = async () => {
+  const settings = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
+  const options = (settings && settings.options && settings.options['tools.backgroundMusic']) || {};
+  const assetId = typeof options.assetId === 'string' && /^\d{1,20}$/.test(options.assetId.trim()) ? options.assetId.trim() : null;
+  const volume = Number.isFinite(options.volume) ? Math.min(Math.max(options.volume, 0), 100) / 100 : 0.4;
+  const tabs = assetId && isOn(settings, 'tools.backgroundMusic') ? await chrome.tabs.query({ url: 'https://www.roblox.com/*' }) : [];
+  const open = await hasOffscreen();
+  if (!tabs.length) {
+    if (open) await chrome.runtime.sendMessage({ type: 'rk-music', id: null }).catch(() => {});
+    return;
+  }
+  const current = open ? await chrome.runtime.sendMessage({ type: 'rk-music-state' }).catch(() => null) : null;
+  if (current && current.id === assetId) {
+    await chrome.runtime.sendMessage({ type: 'rk-music', id: assetId, volume }).catch(() => {});
+    return;
+  }
+  const src = await audioUrl(assetId).catch(() => null);
+  if (!src) return;
+  await openOffscreen();
+  await chrome.runtime.sendMessage({ type: 'rk-music', id: assetId, src, volume }).catch(() => {});
 };
 
 const notify = (title, message, url) => {
@@ -176,9 +207,168 @@ const pollRobux = async (userId, state) => {
   state.robux = robux;
 };
 
+const friendIds = async userId => {
+  const ids = [];
+  let cursor = '';
+  for (let page = 0; page < 40; page++) {
+    const json = await robloxRequest(`https://friends.roblox.com/v1/users/${userId}/friends/find?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+    const items = (json && (json.PageItems || json.data)) || [];
+    for (const item of items) if (item && Number.isSafeInteger(item.id)) ids.push(item.id);
+    cursor = json && (json.NextCursor || json.nextPageCursor);
+    if (!cursor) return ids;
+  }
+  return ids;
+};
+
+const pollUnfriends = async (userId, state) => {
+  const count = await robloxRequest(`https://friends.roblox.com/v1/users/${userId}/friends/count`);
+  const total = Number(count && count.count);
+  const previous = Array.isArray(state.friendIds) ? state.friendIds : null;
+  if (previous && total === state.friendTotal && Date.now() - (state.friendsAt || 0) < 30 * 60 * 1000) return;
+  const ids = await friendIds(userId);
+  if (previous && previous.length > 5 && !ids.length) return;
+  state.friendIds = ids;
+  state.friendTotal = total;
+  state.friendsAt = Date.now();
+  if (!previous) return;
+  const current = new Set(ids);
+  const removed = previous.filter(id => !current.has(id)).slice(0, 50);
+  if (!removed.length) return;
+  const [all, active] = await Promise.all([
+    robloxRequest('https://users.roblox.com/v1/users', { method: 'POST', body: { userIds: removed, excludeBannedUsers: false } }),
+    robloxRequest('https://users.roblox.com/v1/users', { method: 'POST', body: { userIds: removed, excludeBannedUsers: true } })
+  ]);
+  const names = new Map(((all && all.data) || []).map(user => [user.id, user]));
+  const activeIds = new Set(((active && active.data) || []).map(user => user.id));
+  const time = Date.now();
+  const entries = removed.map(id => {
+    const user = names.get(id) || {};
+    return { userId: id, name: cleanText(user.name, 40), displayName: cleanText(user.displayName || user.name, 60), banned: !activeIds.has(id), time };
+  });
+  const log = (await chrome.storage.local.get(UNFRIENDS_KEY))[UNFRIENDS_KEY];
+  await chrome.storage.local.set({ [UNFRIENDS_KEY]: [...entries, ...(Array.isArray(log) ? log : [])].slice(0, 100) });
+  for (const entry of entries.slice(0, 5)) {
+    const name = entry.displayName || `User ${entry.userId}`;
+    notify(entry.banned ? 'Friend removed' : 'Unfriended', entry.banned ? `${name} is no longer your friend, their account was banned or deleted` : `${name} unfriended you`, `https://www.roblox.com/users/${entry.userId}/profile`);
+  }
+  if (entries.length > 5) notify('Unfriended', `${entries.length - 5} more people are no longer your friends`, 'https://www.roblox.com/users/friends');
+};
+
+const watchTargets = async (settings, state) => {
+  const options = (settings && settings.options && settings.options['tools.watchFriend']) || {};
+  const raw = typeof options.users === 'string' ? options.users : '';
+  if (state.watchKey === raw && Array.isArray(state.watchUsers)) return state.watchUsers;
+  const parts = raw.split(',').map(part => part.trim()).filter(Boolean).slice(0, 10);
+  const ids = parts.filter(part => /^\d{1,19}$/.test(part)).map(Number).filter(Number.isSafeInteger);
+  const names = parts.filter(part => /^[A-Za-z0-9_]{3,20}$/.test(part) && !/^\d+$/.test(part));
+  const users = [];
+  if (names.length) {
+    const json = await robloxRequest('https://users.roblox.com/v1/usernames/users', { method: 'POST', body: { usernames: names, excludeBannedUsers: true } });
+    for (const user of (json && json.data) || []) users.push({ id: user.id, name: cleanText(user.displayName || user.name, 60) });
+  }
+  if (ids.length) {
+    const json = await robloxRequest('https://users.roblox.com/v1/users', { method: 'POST', body: { userIds: ids, excludeBannedUsers: true } });
+    for (const user of (json && json.data) || []) users.push({ id: user.id, name: cleanText(user.displayName || user.name, 60) });
+  }
+  state.watchKey = raw;
+  state.watchUsers = users;
+  state.watch = {};
+  return users;
+};
+
+const pollWatched = async (settings, state) => {
+  const users = await watchTargets(settings, state);
+  if (!users.length) return;
+  const json = await robloxRequest('https://presence.roblox.com/v1/presence/users', { method: 'POST', body: { userIds: users.map(user => user.id) } });
+  const previous = state.watch || {};
+  const next = {};
+  for (const entry of (json && json.userPresences) || []) {
+    const user = users.find(item => item.id === entry.userId);
+    if (!user) continue;
+    const now = { type: entry.userPresenceType, place: entry.placeId || entry.rootPlaceId || null };
+    next[entry.userId] = now;
+    const before = previous[entry.userId];
+    if (!before) continue;
+    const url = `https://www.roblox.com/users/${entry.userId}/profile`;
+    if (now.type === 2 && (before.type !== 2 || before.place !== now.place)) notify(user.name, entry.lastLocation ? `Joined ${cleanText(entry.lastLocation, 120)}` : 'Joined a game', url);
+    else if (now.type === 0 && before.type !== 0) notify(user.name, 'Went offline', url);
+    else if (now.type === 1 && before.type === 0) notify(user.name, 'Came online', url);
+    else if (now.type === 1 && before.type === 2) notify(user.name, 'Left their game', url);
+  }
+  state.watch = next;
+};
+
+const pollWishlist = async (settings, data, state) => {
+  if (Date.now() - (state.wishlistAt || 0) < 15 * 60 * 1000) return;
+  state.wishlistAt = Date.now();
+  const list = Array.isArray(data && data.wishlist) ? data.wishlist : [];
+  const items = list.filter(entry => entry && Number.isSafeInteger(entry.id) && (entry.kind === 'asset' || entry.kind === 'bundle')).slice(0, 100);
+  if (!items.length) return;
+  const options = (settings && settings.options && settings.options['tools.wishlistAlerts']) || {};
+  const percent = Number.isFinite(options.percent) ? Math.min(Math.max(options.percent, 0), 95) : 0;
+  const prices = state.wishPrices || {};
+  const next = {};
+  let sent = 0;
+  for (let i = 0; i < items.length; i += 50) {
+    const chunk = items.slice(i, i + 50);
+    const json = await robloxRequest('https://catalog.roblox.com/v1/catalog/items/details', { method: 'POST', body: { items: chunk.map(entry => ({ itemType: entry.kind === 'bundle' ? 'Bundle' : 'Asset', id: entry.id })) } });
+    for (const detail of (json && json.data) || []) {
+      const entry = chunk.find(item => item.id === detail.id && (item.kind === 'bundle') === (detail.itemType === 'Bundle'));
+      if (!entry) continue;
+      const key = `${entry.kind}:${entry.id}`;
+      const lowest = Number.isFinite(detail.lowestPrice) ? detail.lowestPrice : null;
+      const price = lowest !== null ? lowest : Number.isFinite(detail.price) ? detail.price : null;
+      next[key] = price;
+      if (price === null || entry.price === 0) continue;
+      const saved = Number.isFinite(entry.price) ? entry.price : null;
+      const hit = saved === null || (price < saved && price <= saved * (1 - percent / 100));
+      const before = prices[key];
+      if (!hit || (Number.isFinite(before) && price >= before) || sent >= 3) continue;
+      sent++;
+      notify(cleanText(entry.name || detail.name, 80) || 'Wishlist item', saved === null ? `Now on sale for ${price.toLocaleString()} Robux` : `Dropped to ${price.toLocaleString()} Robux, was ${saved.toLocaleString()}`, `https://www.roblox.com/${entry.kind === 'bundle' ? 'bundles' : 'catalog'}/${entry.id}`);
+    }
+  }
+  state.wishPrices = next;
+};
+
+const pollGameUpdates = async (data, state) => {
+  if (Date.now() - (state.gamesAt || 0) < 10 * 60 * 1000) return;
+  state.gamesAt = Date.now();
+  const pins = Array.isArray(data && data['pins.games']) ? data['pins.games'] : [];
+  const ids = [...new Set(pins.map(entry => entry && Number(entry.universeId)).filter(Number.isSafeInteger))].slice(0, 50);
+  if (!ids.length) return;
+  const json = await robloxRequest(`https://games.roblox.com/v1/games?universeIds=${ids.join(',')}`);
+  const previous = state.gameUpdated || {};
+  const next = {};
+  for (const game of (json && json.data) || []) {
+    if (typeof game.updated !== 'string') continue;
+    next[game.id] = game.updated;
+    if (previous[game.id] && previous[game.id] !== game.updated) notify(cleanText(game.name, 80), 'Just got an update', `https://www.roblox.com/games/${game.rootPlaceId}`);
+  }
+  state.gameUpdated = next;
+};
+
+const pollPlaytime = async (userId, state) => {
+  const json = await robloxRequest('https://presence.roblox.com/v1/presence/users', { method: 'POST', body: { userIds: [userId] } });
+  const entry = json && Array.isArray(json.userPresences) ? json.userPresences[0] : null;
+  const now = Date.now();
+  const universe = entry && entry.userPresenceType === 2 && Number.isSafeInteger(entry.universeId) ? entry.universeId : null;
+  const last = state.playing;
+  state.playing = universe ? { universe, time: now } : null;
+  if (!universe || !last || last.universe !== universe) return;
+  const minutes = Math.min(now - last.time, 2 * 60 * 1000) / 60000;
+  const stored = (await chrome.storage.local.get(PLAYTIME_KEY))[PLAYTIME_KEY];
+  const games = stored && typeof stored === 'object' ? stored : {};
+  const game = games[universe] && typeof games[universe] === 'object' ? games[universe] : { minutes: 0 };
+  games[universe] = { minutes: (Number(game.minutes) || 0) + minutes, placeId: entry.rootPlaceId || entry.placeId || game.placeId || null, name: cleanText(entry.lastLocation || game.name, 120), last: now };
+  const kept = Object.entries(games).sort((a, b) => (b[1].last || 0) - (a[1].last || 0)).slice(0, 200);
+  await chrome.storage.local.set({ [PLAYTIME_KEY]: Object.fromEntries(kept) });
+};
+
 const poll = async () => {
-  const stored = await chrome.storage.local.get([SETTINGS_KEY, STATE_KEY]);
+  const stored = await chrome.storage.local.get([SETTINGS_KEY, STATE_KEY, DATA_KEY]);
   const settings = stored[SETTINGS_KEY];
+  const data = stored[DATA_KEY] && typeof stored[DATA_KEY] === 'object' ? stored[DATA_KEY] : {};
   if (!ALERT_FEATURES.some(id => isOn(settings, id))) return syncAlarm();
   let me;
   try {
@@ -195,6 +385,16 @@ const poll = async () => {
   else delete state.tradeCount;
   if (isOn(settings, 'tools.robuxAlerts')) jobs.push(pollRobux(me.id, state));
   else delete state.robux;
+  if (isOn(settings, 'tools.unfriendAlerts')) jobs.push(pollUnfriends(me.id, state));
+  else delete state.friendIds;
+  if (isOn(settings, 'tools.watchFriend')) jobs.push(pollWatched(settings, state));
+  else delete state.watch;
+  if (isOn(settings, 'tools.wishlistAlerts')) jobs.push(pollWishlist(settings, data, state));
+  else delete state.wishPrices;
+  if (isOn(settings, 'tools.gameUpdateAlerts')) jobs.push(pollGameUpdates(data, state));
+  else delete state.gameUpdated;
+  if (isOn(settings, 'tools.playtime')) jobs.push(pollPlaytime(me.id, state));
+  else delete state.playing;
   await Promise.allSettled(jobs);
   await chrome.storage.local.set({ [STATE_KEY]: state });
 };
@@ -217,6 +417,15 @@ const handlers = {
   },
   download: payload => download(payload || {}),
   sound: () => playSound().then(() => true),
+  music: () => syncMusic().then(() => true),
+  unfriends: async () => {
+    const log = (await chrome.storage.local.get(UNFRIENDS_KEY))[UNFRIENDS_KEY];
+    return Array.isArray(log) ? log : [];
+  },
+  playtime: async () => {
+    const games = (await chrome.storage.local.get(PLAYTIME_KEY))[PLAYTIME_KEY];
+    return games && typeof games === 'object' ? games : {};
+  },
   'poll-now': () => poll().then(() => true)
 };
 
@@ -257,7 +466,17 @@ chrome.alarms.onAlarm.addListener(alarm => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes[SETTINGS_KEY]) syncAlarm();
+  if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+  syncAlarm();
+  syncMusic().catch(() => {});
+});
+
+chrome.tabs.onRemoved.addListener(() => {
+  syncMusic().catch(() => {});
+});
+
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.url || change.status === 'complete') syncMusic().catch(() => {});
 });
 
 chrome.runtime.onInstalled.addListener(() => syncAlarm());
