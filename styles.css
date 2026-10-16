@@ -1313,6 +1313,10 @@
   box-shadow: 0 0 0 1px var(--rk-accent), 0 0 12px color-mix(in srgb, var(--rk-accent) 35%, transparent);
 }
 
+.rk-futuristic .rk-mascot {
+  visibility: hidden;
+}
+
 @keyframes rk-future-sweep {
   from {
     transform: translateX(-100%);
