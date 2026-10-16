@@ -6,6 +6,70 @@
   let lastScroll = 0;
   let query = '';
   let localChange = false;
+  let theme = Rk.store.get('settings.theme', 'sakura') === 'classic' ? 'classic' : 'sakura';
+
+  const mascotSvg = `
+    <svg viewBox="0 0 200 250" width="150" height="188" aria-hidden="true">
+      <g class="rk-mascot-bubble">
+        <rect x="118" y="2" width="56" height="28" rx="14" fill="#ffffff" stroke="#ff7eb6" stroke-width="2"/>
+        <path d="M134 29 L128 38 L142 29 Z" fill="#ffffff" stroke="#ff7eb6" stroke-width="2" stroke-linejoin="round"/>
+        <rect x="131" y="26" width="12" height="4" fill="#ffffff"/>
+        <text x="146" y="21" text-anchor="middle" font-size="14" font-weight="700" font-family="Arial, sans-serif" fill="#ff5fa2">hi!</text>
+      </g>
+      <g class="rk-mascot-figure">
+        <path class="rk-mascot-tail rk-mascot-tail-l" d="M50 74 C20 98 14 150 26 204 C30 220 46 222 46 205 C40 160 50 120 62 92 Z" fill="#f78fc0"/>
+        <path class="rk-mascot-tail rk-mascot-tail-r" d="M150 74 C180 98 186 150 174 204 C170 220 154 222 154 205 C160 160 150 120 138 92 Z" fill="#f78fc0"/>
+        <path d="M44 96 C40 46 70 22 100 22 C130 22 160 46 156 96 L154 136 C140 146 60 146 46 136 Z" fill="#ec79b1"/>
+        <rect x="86" y="222" width="10" height="20" rx="4" fill="#ffe6dc"/>
+        <rect x="104" y="222" width="10" height="20" rx="4" fill="#ffe6dc"/>
+        <ellipse cx="90" cy="243" rx="9" ry="5" fill="#d9468f"/>
+        <ellipse cx="110" cy="243" rx="9" ry="5" fill="#d9468f"/>
+        <path d="M80 154 C70 170 66 186 66 200" stroke="#f08fbd" stroke-width="15" stroke-linecap="round" fill="none"/>
+        <path d="M80 154 C70 170 66 186 66 200" stroke="#ffc2dc" stroke-width="11" stroke-linecap="round" fill="none"/>
+        <circle cx="66" cy="204" r="6" fill="#ffe6dc"/>
+        <path d="M78 148 C88 144 112 144 122 148 L142 222 C120 232 80 232 58 222 Z" fill="#fff4f8" stroke="#f3a3c8" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M62 210 C84 218 116 218 138 210" stroke="#ff7eb6" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M84 148 L100 162 L116 148" stroke="#ff7eb6" stroke-width="3" fill="none" stroke-linejoin="round"/>
+        <path d="M100 162 L88 155 L88 170 Z M100 162 L112 155 L112 170 Z" fill="#ff5fa2"/>
+        <circle cx="100" cy="162" r="3.5" fill="#e04589"/>
+        <g class="rk-mascot-arm">
+          <g class="rk-mascot-wave">
+            <path d="M120 154 C130 170 134 186 134 200" stroke="#f08fbd" stroke-width="15" stroke-linecap="round" fill="none"/>
+            <path d="M120 154 C130 170 134 186 134 200" stroke="#ffc2dc" stroke-width="11" stroke-linecap="round" fill="none"/>
+            <circle cx="134" cy="204" r="6" fill="#ffe6dc"/>
+          </g>
+        </g>
+        <rect x="93" y="132" width="14" height="16" fill="#ffd9cc"/>
+        <ellipse cx="100" cy="94" rx="48" ry="44" fill="#ffe9df"/>
+        <g class="rk-mascot-eyes">
+          <ellipse cx="80" cy="100" rx="8.5" ry="11" fill="#4b2453"/>
+          <ellipse cx="80" cy="104" rx="6" ry="6.5" fill="#c55aa8"/>
+          <circle cx="77" cy="96" r="3" fill="#ffffff"/>
+          <circle cx="83" cy="106" r="1.4" fill="#ffffff"/>
+          <ellipse cx="120" cy="100" rx="8.5" ry="11" fill="#4b2453"/>
+          <ellipse cx="120" cy="104" rx="6" ry="6.5" fill="#c55aa8"/>
+          <circle cx="117" cy="96" r="3" fill="#ffffff"/>
+          <circle cx="123" cy="106" r="1.4" fill="#ffffff"/>
+        </g>
+        <path d="M71 92 Q80 85 89 91 M111 91 Q120 85 129 92" stroke="#4b2453" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+        <ellipse cx="68" cy="116" rx="7" ry="4" fill="#ff8fb8" opacity="0.55"/>
+        <ellipse cx="132" cy="116" rx="7" ry="4" fill="#ff8fb8" opacity="0.55"/>
+        <path d="M95 117 Q100 122 105 117" stroke="#c4466f" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M52 86 C44 104 46 124 54 138 C58 122 60 104 60 90 Z" fill="#f78fc0"/>
+        <path d="M148 86 C156 104 154 124 146 138 C142 122 140 104 140 90 Z" fill="#f78fc0"/>
+        <path d="M52 92 C50 52 76 36 100 36 C124 36 150 52 148 92 C142 78 134 68 126 80 C120 64 110 60 102 74 C96 60 84 62 78 78 C70 66 58 74 52 92 Z" fill="#f78fc0"/>
+        <path d="M76 50 Q100 40 124 50" stroke="#ffffff" stroke-width="3" opacity="0.45" fill="none" stroke-linecap="round"/>
+        <g transform="translate(52 76)" fill="#ffffff">
+          <circle cx="0" cy="-4" r="3.5"/><circle cx="3.8" cy="-1.2" r="3.5"/><circle cx="2.4" cy="3.2" r="3.5"/><circle cx="-2.4" cy="3.2" r="3.5"/><circle cx="-3.8" cy="-1.2" r="3.5"/>
+          <circle r="2" fill="#ff5fa2"/>
+        </g>
+        <g transform="translate(148 76)" fill="#ffffff">
+          <circle cx="0" cy="-4" r="3.5"/><circle cx="3.8" cy="-1.2" r="3.5"/><circle cx="2.4" cy="3.2" r="3.5"/><circle cx="-2.4" cy="3.2" r="3.5"/><circle cx="-3.8" cy="-1.2" r="3.5"/>
+          <circle r="2" fill="#ff5fa2"/>
+        </g>
+      </g>
+    </svg>
+  `;
 
   const categoryName = id => {
     const category = Rk.categories.find(item => item.id === id);
@@ -182,6 +246,7 @@
     lastScroll = current.list.scrollTop;
     Rk.store.set('settings.view', { category: activeCategory, scroll: lastScroll });
     document.documentElement.style.overflow = current.previousOverflow;
+    current.mascot.classList.remove('rk-mascot-shown');
     current.backdrop.classList.remove('rk-modal-open');
     current.backdrop.addEventListener('transitionend', () => current.backdrop.remove(), { once: true });
     setTimeout(() => current.backdrop.remove(), 400);
@@ -207,6 +272,11 @@
       return item;
     }));
     const total = el('div');
+    const themePicker = ui.select([['sakura', 'Sakura'], ['classic', 'Classic']], theme, next => {
+      theme = next === 'classic' ? 'classic' : 'sakura';
+      Rk.store.set('settings.theme', theme);
+      frame.classList.toggle('rk-sakura', theme === 'sakura');
+    });
     const title = el('h2', { class: 'rk-settings-title' });
     const subtitle = el('p', { class: 'rk-settings-subtitle' });
     const bulk = el('div', { class: 'rk-inline' },
@@ -235,24 +305,31 @@
       foot
     );
     const dialog = el('div', { class: 'rk-settings', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Rola settings', tabindex: '-1' },
+      el('div', { class: 'rk-settings-titlebar' },
+        el('span', null, 'Rola Settings'),
+        el('button', { type: 'button', class: 'rk-settings-titlebar-close', 'aria-label': 'Close', onclick: close }, icon('close', 16))
+      ),
       el('aside', { class: 'rk-settings-side' },
         el('div', { class: 'rk-settings-brand' }, el('span', { class: 'rk-settings-brand-name' }, 'Rola')),
         el('div', { class: 'rk-settings-search' }, icon('search', 16), search),
         nav,
-        el('div', { class: 'rk-settings-side-footer' }, total)
+        el('div', { class: 'rk-settings-side-footer' }, total, el('label', { class: 'rk-settings-theme' }, el('span', null, 'Theme'), themePicker))
       ),
       main
     );
+    const mascot = el('div', { class: 'rk-mascot' });
+    mascot.innerHTML = mascotSvg;
+    const frame = el('div', { class: `rk-settings-frame${theme === 'sakura' ? ' rk-sakura' : ''}` }, dialog, mascot);
     const backdrop = el('div', { class: 'rk-modal-backdrop', onmousedown: event => {
       if (event.target === backdrop) close();
-    } }, dialog);
+    } }, frame);
     backdrop.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.stopPropagation();
         close();
       }
     });
-    return { backdrop, dialog, search, counts, navItems, total, title, subtitle, bulk, list, banner, foot, main, previousOverflow: '' };
+    return { backdrop, dialog, mascot, search, counts, navItems, total, title, subtitle, bulk, list, banner, foot, main, previousOverflow: '' };
   };
 
   const open = () => {
@@ -272,6 +349,7 @@
     requestAnimationFrame(() => {
       if (!panel) return;
       panel.backdrop.classList.add('rk-modal-open');
+      panel.mascot.classList.add('rk-mascot-shown');
       panel.search.focus({ preventScroll: true });
     });
   };

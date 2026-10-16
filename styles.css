@@ -1085,6 +1085,296 @@
   }
 }
 
+.rk-settings-frame {
+  position: relative;
+  display: flex;
+}
+
+.rk-settings-titlebar {
+  display: none;
+}
+
+.rk-settings-side-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rk-settings-theme {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rk-settings-theme .rk-select {
+  height: 28px;
+  font-size: 12px;
+}
+
+.rk-mascot {
+  display: none;
+}
+
+.rk-sakura {
+  --rk-bg: #fff0f5;
+  --rk-surface: #ffe3ee;
+  --rk-surface-2: #ffd6e7;
+  --rk-surface-3: #f8c3da;
+  --rk-text: #5a3a4a;
+  --rk-text-strong: #3d2533;
+  --rk-muted: #a3708b;
+  --rk-border: #f6b0cf;
+  --rk-shift: rgba(255, 95, 162, 0.16);
+  --rk-hover: rgba(255, 95, 162, 0.09);
+  --rk-press: rgba(255, 95, 162, 0.2);
+  --rk-accent: #ff5fa2;
+  --rk-accent-hover: #f0478f;
+  --rk-accent-soft: rgba(255, 95, 162, 0.16);
+  --rk-success: #2f9e6a;
+  --rk-warning: #c47f00;
+  --rk-danger: #e0446a;
+  --rk-radius: 4px;
+  --rk-radius-l: 6px;
+  --rk-shadow: 0 18px 44px rgba(214, 70, 140, 0.28), 0 2px 8px rgba(214, 70, 140, 0.16);
+  padding-right: 140px;
+}
+
+.rk-modal-backdrop:has(> .rk-sakura) {
+  background: rgba(70, 20, 45, 0.42);
+}
+
+.rk-sakura .rk-settings {
+  grid-template-rows: auto 1fr;
+  width: min(1040px, calc(100vw - 172px));
+  border: 2px solid #ff7eb6;
+}
+
+.rk-sakura .rk-settings-titlebar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 8px 0 16px;
+  background: linear-gradient(#ff8cc0, #ff6fae);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.rk-settings-titlebar-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  transition: background-color var(--rk-fast) ease;
+}
+
+.rk-settings-titlebar-close:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.rk-sakura .rk-settings-brand,
+.rk-sakura .rk-settings-head-actions > .rk-btn-icon {
+  display: none;
+}
+
+.rk-sakura .rk-settings-side {
+  margin: 8px 0 8px 8px;
+  border: 1px solid var(--rk-border);
+  border-radius: 4px;
+}
+
+.rk-sakura .rk-settings-nav-item[aria-current="true"] {
+  background: var(--rk-shift);
+  color: var(--rk-accent);
+  box-shadow: inset 3px 0 0 var(--rk-accent);
+}
+
+.rk-sakura .rk-settings-head,
+.rk-sakura .rk-settings-foot {
+  border-color: var(--rk-border);
+}
+
+.rk-sakura .rk-settings-title {
+  color: var(--rk-accent);
+}
+
+.rk-sakura .rk-settings-list {
+  scrollbar-color: #ff9cc8 transparent;
+}
+
+.rk-sakura .rk-setting {
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid var(--rk-border);
+  border-radius: 4px;
+  background: #fff7fa;
+}
+
+.rk-sakura .rk-setting:last-child {
+  border-bottom: 1px solid var(--rk-border);
+}
+
+.rk-sakura .rk-setting-options {
+  border: 1px solid var(--rk-border);
+  background: var(--rk-bg);
+}
+
+.rk-sakura .rk-input,
+.rk-sakura .rk-select {
+  background: #ffffff;
+  border-color: var(--rk-border);
+}
+
+.rk-sakura .rk-btn-ghost {
+  border: 1px solid var(--rk-border);
+  background: #fff7fa;
+}
+
+.rk-sakura .rk-btn.rk-settings-reset {
+  border: 0;
+}
+
+.rk-sakura .rk-mascot {
+  position: absolute;
+  right: 0;
+  bottom: -6px;
+  display: block;
+  width: 150px;
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 360ms ease 120ms, transform 520ms var(--rk-ease) 120ms;
+  pointer-events: none;
+}
+
+.rk-sakura .rk-mascot.rk-mascot-shown {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.rk-mascot svg {
+  display: block;
+  overflow: visible;
+  pointer-events: auto;
+}
+
+.rk-mascot-figure {
+  animation: rk-mascot-bob 3.2s ease-in-out infinite;
+}
+
+.rk-mascot-tail,
+.rk-mascot-eyes,
+.rk-mascot-arm,
+.rk-mascot-wave {
+  transform-box: view-box;
+}
+
+.rk-mascot-tail-l {
+  transform-origin: 52px 76px;
+  animation: rk-mascot-sway 2.8s ease-in-out infinite alternate;
+}
+
+.rk-mascot-tail-r {
+  transform-origin: 148px 76px;
+  animation: rk-mascot-sway 2.8s ease-in-out -1.4s infinite alternate-reverse;
+}
+
+.rk-mascot-eyes {
+  transform-origin: 100px 100px;
+  animation: rk-mascot-blink 4.6s ease-in-out infinite;
+}
+
+.rk-mascot-arm {
+  transform-origin: 120px 154px;
+  transition: transform 380ms var(--rk-ease);
+}
+
+.rk-mascot-wave {
+  transform-origin: 120px 154px;
+}
+
+.rk-mascot svg:hover .rk-mascot-arm {
+  transform: rotate(-140deg);
+}
+
+.rk-mascot svg:hover .rk-mascot-wave {
+  animation: rk-mascot-wave 0.5s ease-in-out 0.3s infinite alternate;
+}
+
+.rk-mascot-bubble {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 220ms ease, transform 300ms var(--rk-ease);
+}
+
+.rk-mascot svg:hover .rk-mascot-bubble {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (max-width: 760px) {
+  .rk-sakura {
+    padding-right: 0;
+  }
+
+  .rk-sakura .rk-settings {
+    width: min(1040px, calc(100vw - 32px));
+  }
+
+  .rk-sakura .rk-mascot,
+  .rk-settings-side-footer {
+    display: none;
+  }
+}
+
+@keyframes rk-mascot-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes rk-mascot-sway {
+  from {
+    transform: rotate(-4deg);
+  }
+  to {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes rk-mascot-blink {
+  0%,
+  90%,
+  100% {
+    transform: scaleY(1);
+  }
+  94% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes rk-mascot-wave {
+  from {
+    transform: rotate(-12deg);
+  }
+  to {
+    transform: rotate(12deg);
+  }
+}
+
 @keyframes rk-spin {
   to {
     transform: rotate(360deg);
@@ -1134,6 +1424,8 @@
   .rk-settings-banner,
   .rk-thumb,
   .rk-progress-fill,
+  .rk-mascot,
+  .rk-mascot *,
   [data-rk-tip]::after {
     animation: none !important;
     transition: none !important;
