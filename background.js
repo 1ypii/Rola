@@ -577,7 +577,7 @@ const imageData = async ({ url } = {}) => {
   return `data:${type};base64,${encodeBytes(buffer)}`;
 };
 
-const REGIONS_KEY = 'rkbg:regions';
+const REGIONS_KEY = 'rkbg:regions2';
 
 const regionList = async () => {
   const saved = (await chrome.storage.local.get(REGIONS_KEY))[REGIONS_KEY];
@@ -586,13 +586,22 @@ const regionList = async () => {
   if (!response.ok) throw new Error(`region list failed ${response.status}`);
   const raw = await response.json();
   if (!raw || !Array.isArray(raw._c) || !Array.isArray(raw._ci)) throw new Error('unexpected region list');
+  const names = new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' });
+  const realCode = code => typeof code === 'string' && /^[A-Z]{2}$/.test(code) && Boolean(names.of(code));
+  const cityCodes = new Map();
+  for (const entry of Object.values(raw)) {
+    if (!entry || typeof entry !== 'object' || !Array.isArray(raw._c[entry.co])) continue;
+    const code = raw._c[entry.co][1];
+    if (realCode(code) && typeof raw._ci[entry.ci] === 'string') cityCodes.set(raw._ci[entry.ci], code);
+  }
   const labels = [];
   const groups = [];
   for (const [key, entry] of Object.entries(raw)) {
     const match = /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.0$/.exec(key);
     if (!match || !entry || typeof entry !== 'object') continue;
     const city = raw._ci[entry.ci];
-    const country = Array.isArray(raw._c[entry.co]) ? raw._c[entry.co][1] : null;
+    const listed = Array.isArray(raw._c[entry.co]) ? raw._c[entry.co][1] : null;
+    const country = realCode(listed) ? listed : cityCodes.get(city) || listed;
     if (typeof city !== 'string' || typeof country !== 'string') continue;
     const label = `${city.slice(0, 40)}, ${country.slice(0, 4)}`;
     let index = labels.indexOf(label);

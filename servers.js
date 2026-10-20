@@ -1256,7 +1256,10 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
         span.replaceChildren(result.label);
         span.title = `Server in ${result.label}`;
         flagFor(code).then(data => {
-          if (data && span.isConnected && !span.querySelector('.rk-servers-flag')) span.prepend(el('img', { class: 'rk-servers-flag', src: data, alt: code }));
+          if (!data || !span.isConnected || span.querySelector('.rk-servers-flag')) return;
+          const flag = el('img', { class: 'rk-servers-flag', alt: code });
+          flag.src = data;
+          span.prepend(flag);
         });
       };
 
