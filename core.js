@@ -811,6 +811,8 @@ const Rk = (() => {
     keyboard: [['rect', { x: 2.5, y: 6, width: 19, height: 12, rx: 2 }], ['path', { d: 'M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8' }]],
     note: [['path', { d: 'M5 4h14v11l-5 5H5z' }], ['path', { d: 'M14 20v-5h5M8 9h8M8 13h4' }]],
     shield: [['path', { d: 'M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z' }]],
+    lock: [['rect', { x: 5, y: 11, width: 14, height: 10, rx: 2 }], ['path', { d: 'M8 11V7a4 4 0 0 1 8 0v4' }]],
+    box: [['path', { d: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4' }]],
     robux: [['path', { d: 'M12 2.8l8 4.6v9.2l-8 4.6-8-4.6V7.4z' }], ['rect', { x: 9, y: 9, width: 6, height: 6, rx: 0.6 }]]
   };
 

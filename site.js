@@ -2346,6 +2346,126 @@
     }
   });
 
+  const privacyRows = [
+    ['whoCanSeeMyOnlineStatus', 'Online Status', 'eye'],
+    ['whoCanJoinMeInExperiences', 'Experience Status', 'play'],
+    ['privateServerPrivacy', 'Private Server Privacy', 'lock'],
+    ['whoCanSeeMyInventory', 'Inventory Privacy', 'box']
+  ];
+
+  const privacyLabels = {
+    All: 'Everyone',
+    AllUsers: 'Everyone',
+    FriendsFollowingAndFollowers: 'Friends, following and followers',
+    FriendsAndFollowing: 'Friends and following',
+    Friends: 'Friends',
+    TrustedFriends: 'Trusted friends',
+    Followers: 'Followers',
+    Following: 'Following',
+    Default: 'Default',
+    NoOne: 'No one'
+  };
+
+  Rk.feature({
+    id: 'site.privacyMenu',
+    category: 'site',
+    name: 'Privacy menu in header',
+    description: 'Adds a lock button to the top bar to change who can see your online status, join you, use your private servers and see your inventory.',
+    default: false,
+    css: `
+      .rk-privacy-menu { width: 390px; max-width: calc(100vw - 16px); padding: 6px 4px; }
+      .rk-privacy-title { padding: 6px 12px 10px; font-size: 13px; font-weight: 600; color: var(--rk-muted); }
+      .rk-privacy-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+      .rk-privacy-row > .rk-icon { flex: none; color: var(--rk-muted); }
+      .rk-privacy-label { flex: 1; min-width: 0; overflow: hidden; font-size: 15px; font-weight: 600; color: var(--rk-text-strong); white-space: nowrap; text-overflow: ellipsis; }
+      .rk-privacy-row .rk-select { flex: none; max-width: 150px; height: 34px; }
+      .rk-privacy-row[aria-busy="true"] .rk-select { opacity: 0.5; pointer-events: none; }
+      .rk-privacy-empty { padding: 12px; font-size: 13px; color: var(--rk-muted); }
+    `,
+    run(ctx) {
+      const url = 'https://apis.roblox.com/user-settings-api/v1/user-settings';
+      let close = null;
+      const rowFor = (key, label, iconName, setting) => {
+        const choices = (Array.isArray(setting.options) ? setting.options : [])
+          .map(entry => entry && entry.option && typeof entry.option.optionValue === 'string' ? { value: entry.option.optionValue, open: entry.requirement === undefined || entry.requirement === 'SelfUpdateSetting' } : null)
+          .filter(choice => choice && (choice.open || choice.value === setting.currentValue));
+        if (!choices.length || typeof setting.currentValue !== 'string') return null;
+        let current = setting.currentValue;
+        const row = el('div', { class: 'rk-privacy-row' }, icon(iconName, 18), el('span', { class: 'rk-privacy-label' }, label));
+        const picker = ui.select(choices.map(choice => [choice.value, privacyLabels[choice.value] || choice.value]), current, async next => {
+          row.setAttribute('aria-busy', 'true');
+          try {
+            await Rk.api.post(url, { [key]: next });
+            current = next;
+            ui.toast(`${label} set to ${privacyLabels[next] || next}`, { tone: 'success' });
+          } catch {
+            picker.value = current;
+            ui.toast(`Could not change ${label.toLowerCase()}`, { tone: 'danger' });
+          }
+          row.removeAttribute('aria-busy');
+        });
+        row.append(picker);
+        return row;
+      };
+      const open = async anchor => {
+        if (close) {
+          close();
+          return;
+        }
+        const menu = el('div', { class: 'rk-menu rk-privacy-menu', role: 'dialog', 'aria-label': 'Privacy settings' }, el('div', { class: 'rk-privacy-empty' }, ui.spinner(16)));
+        const onDown = event => {
+          if (!menu.contains(event.target) && !anchor.contains(event.target)) close();
+        };
+        const onKey = event => {
+          if (event.key === 'Escape') close();
+        };
+        close = () => {
+          document.removeEventListener('mousedown', onDown, true);
+          document.removeEventListener('keydown', onKey, true);
+          menu.classList.remove('rk-menu-open');
+          setTimeout(() => menu.remove(), 180);
+          close = null;
+        };
+        document.addEventListener('mousedown', onDown, true);
+        document.addEventListener('keydown', onKey, true);
+        const place = () => {
+          const rect = anchor.getBoundingClientRect();
+          menu.style.top = `${Math.round(rect.bottom + window.scrollY + 6)}px`;
+          menu.style.left = `${Math.max(8, Math.round(rect.right + window.scrollX - menu.offsetWidth))}px`;
+        };
+        document.body.append(menu);
+        place();
+        requestAnimationFrame(() => menu.classList.add('rk-menu-open'));
+        const settings = await Rk.api.get(`${url}/settings-and-options`).catch(() => null);
+        if (!menu.isConnected) return;
+        const rows = settings && typeof settings === 'object'
+          ? privacyRows.map(([key, label, iconName]) => (settings[key] && typeof settings[key] === 'object' ? rowFor(key, label, iconName, settings[key]) : null)).filter(Boolean)
+          : [];
+        menu.replaceChildren(el('div', { class: 'rk-privacy-title' }, 'Privacy Settings'), ...(rows.length ? rows : [el('div', { class: 'rk-privacy-empty' }, 'Could not load your privacy settings')]));
+        place();
+      };
+      const button = ui.tip(el('a', { class: 'rk-nav-button', href: '/my/account#!/privacy', role: 'button', 'data-rk-tip-pos': 'below' }, icon('lock', 22)), 'Privacy Settings');
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        open(button);
+      });
+      const item = el('li', { class: 'navbar-icon-item rk-nav-item rk-privacy-nav' }, button);
+      Rk.onSettings(() => {
+        const on = Rk.isEnabled(ctx.id);
+        item.classList.toggle('rk-hidden', !on);
+        if (!on && close) close();
+      });
+      Rk.observe('ul.navbar-right', navbar => {
+        if (navbar.contains(item)) return;
+        const bell = [...navbar.children].find(node => node.querySelector('#navbar-notifications, .notification-stream-icon, [class*="notification"]'));
+        const robux = [...navbar.children].find(node => node.id === 'navbar-robux' || node.querySelector('#navbar-robux'));
+        if (bell) bell.before(item);
+        else if (robux) robux.before(item);
+        else navbar.append(item);
+      });
+    }
+  });
+
   Rk.feature({
     id: 'site.peopleSearch',
     category: 'site',
