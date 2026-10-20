@@ -822,6 +822,33 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     }
   });
 
+  Rk.feature({
+    id: 'profiles.exactCounts',
+    category: 'profiles',
+    name: 'Exact friend counts',
+    description: 'Shows the exact friends, followers and following counts under the name, even when the user hides their lists.',
+    default: false,
+    pages: PROFILE,
+    css: `${statusCss}
+.rk-profile-counts { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.rk-profile-counts a { color: var(--rk-muted) !important; text-decoration: none !important; }
+.rk-profile-counts a:hover { color: var(--rk-text-strong) !important; }
+.rk-profile-counts b { color: var(--rk-text-strong); font-weight: 700; }
+${nativeCss('counts', '.profile-header-social-counts')}`,
+    run: replacing('counts', async () => {
+      const id = profileId();
+      if (!id) return null;
+      const counts = await Promise.all(['friends', 'followers', 'followings'].map(kind => safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/${kind}/count`, { cache: 60000 }))));
+      const parts = [['Friend', 'Friends', 'friends'], ['Follower', 'Followers', 'followers'], ['Following', 'Following', 'following']]
+        .map(([one, many, tab], index) => ({ value: counts[index] && counts[index].count, one, many, tab }))
+        .filter(part => Number.isSafeInteger(part.value) && part.value >= 0);
+      if (!parts.length) return null;
+      const node = el('span', { class: 'rk-profile-counts' }, parts.map(part => el('a', { href: `/users/${id}/friends#!/${part.tab}` }, el('b', null, fmt.num(part.value)), ` ${part.value === 1 ? part.one : part.many}`)));
+      addStatus(node, 4);
+      return node;
+    })
+  });
+
   const VALUE_TIERS = [[100000000, '100M+'], [50000000, '50M+'], [20000000, '20M+'], [10000000, '10M+'], [5000000, '5M+'], [1000000, '1M+'], [500000, '500K+'], [100000, '100K+']];
   const RARES = [
     ['dominus', /^Dominus\b/i, 'Dominus', 'Owns a Dominus'],

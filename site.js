@@ -2140,6 +2140,150 @@
   });
 
   Rk.feature({
+    id: 'site.peopleSearch',
+    category: 'site',
+    name: 'People in header search',
+    description: 'Shows matching people with their avatar and username while you type in the top search bar. Click one to open their profile.',
+    default: false,
+    css: `
+      .rk-people-search {
+        position: fixed;
+        z-index: 2147481500;
+        display: flex;
+        flex-direction: column;
+        padding: 6px;
+        border: 1px solid var(--rk-border);
+        border-radius: 12px;
+        background: var(--rk-bg);
+        box-shadow: var(--rk-shadow);
+        font-family: var(--rk-font);
+        opacity: 0;
+        transform: translateY(-4px);
+        transition: opacity 140ms ease, transform 180ms var(--rk-ease);
+        pointer-events: none;
+      }
+      .rk-people-search.rk-people-search-open {
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+      }
+      .rk-people-search-label {
+        padding: 4px 10px 6px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--rk-muted);
+      }
+      .rk-people-search-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        color: var(--rk-text) !important;
+        text-decoration: none !important;
+        transition: background-color var(--rk-fast) ease;
+      }
+      .rk-people-search-row:hover {
+        background: var(--rk-hover);
+      }
+      .rk-people-search-text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .rk-people-search-name {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        overflow: hidden;
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--rk-accent);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .rk-people-search-user {
+        font-size: 13px;
+        color: var(--rk-muted);
+      }
+    `,
+    run(ctx) {
+      const panel = el('div', { class: 'rk-people-search', role: 'listbox', 'aria-label': 'People' });
+      const sessionId = crypto.randomUUID();
+      let field = null;
+      let timer = 0;
+      let request = 0;
+      const close = () => {
+        request += 1;
+        clearTimeout(timer);
+        panel.classList.remove('rk-people-search-open');
+      };
+      const position = () => {
+        const box = field.closest('#navbar-universal-search, .navbar-search') || field;
+        const menu = box.querySelector('ul.dropdown-menu');
+        const anchor = menu && menu.offsetHeight ? menu.getBoundingClientRect() : field.getBoundingClientRect();
+        const bounds = box.getBoundingClientRect();
+        panel.style.left = `${bounds.left}px`;
+        panel.style.top = `${anchor.bottom + 6}px`;
+        panel.style.width = `${Math.max(bounds.width, 300)}px`;
+      };
+      const render = users => {
+        panel.replaceChildren(el('div', { class: 'rk-people-search-label' }, 'People'), ...users.map(user => el('a', {
+          class: 'rk-people-search-row',
+          role: 'option',
+          href: `/users/${user.id}/profile`,
+          onpointerdown: event => event.preventDefault()
+        },
+        ui.thumb(Rk.thumb('AvatarHeadShot', user.id, '150x150'), { size: 44, round: true }),
+        el('span', { class: 'rk-people-search-text' },
+          el('span', { class: 'rk-people-search-name' }, user.displayName, user.verified ? ui.verified({ size: 16 }) : null),
+          el('span', { class: 'rk-people-search-user' }, `@${user.name}`)
+        ))));
+        position();
+        panel.classList.add('rk-people-search-open');
+      };
+      const search = async text => {
+        const token = ++request;
+        const json = await Rk.api.get(`https://apis.roblox.com/search-api/omni-search?searchQuery=${encodeURIComponent(text)}&verticalType=user&sessionId=${sessionId}&pageType=all`, { cache: 60000 }).catch(() => null);
+        if (token !== request || !field || document.activeElement !== field) return;
+        const group = json && Array.isArray(json.searchResults) ? json.searchResults.find(item => item && item.contentGroupType === 'User') : null;
+        const users = (group && Array.isArray(group.contents) ? group.contents : [])
+          .filter(item => item && Number.isSafeInteger(item.contentId) && typeof item.username === 'string')
+          .slice(0, 6)
+          .map(item => ({
+            id: item.contentId,
+            name: item.username,
+            displayName: typeof item.displayName === 'string' && item.displayName ? item.displayName : item.username,
+            verified: item.hasVerifiedBadge === true
+          }));
+        if (!users.length) {
+          close();
+          return;
+        }
+        render(users);
+      };
+      Rk.domReady.then(() => document.body.append(panel));
+      Rk.observe('#navbar-search-input, #navbar-universal-search input, .navbar-search input', input => {
+        input.addEventListener('input', () => {
+          field = input;
+          close();
+          const text = input.value.trim();
+          if (!Rk.isEnabled(ctx.id) || text.length < 3) return;
+          timer = setTimeout(() => search(text), 250);
+        });
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Escape') close();
+        });
+        input.addEventListener('blur', close);
+      });
+      window.addEventListener('resize', close, { passive: true });
+      Rk.onSettings(() => {
+        if (!Rk.isEnabled(ctx.id)) close();
+      });
+    }
+  });
+
+  Rk.feature({
     id: 'site.fontSmoothing',
     category: 'site',
     name: 'Font smoothing',

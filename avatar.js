@@ -148,6 +148,16 @@
 
   const metaLine = (label, content) => el('span', { class: 'rk-inline' }, el('span', { class: 'rk-muted' }, label), content);
 
+  const nativeCss = (key, selector) => `html:not(.rk-show-${key}) :is(${selector}) { display: none !important; }`;
+  const replacing = (key, run) => async ctx => {
+    let placed = null;
+    try {
+      placed = await run(ctx);
+    } finally {
+      if (!placed) document.documentElement.classList.add(`rk-show-${key}`);
+    }
+  };
+
   const openSection = (area, title, options) => {
     const node = ui.section(title, ui.spinner(), options);
     area.append(node);
@@ -466,12 +476,12 @@
     id: 'avatar.bundleContents',
     category: 'avatar',
     name: 'Bundle contents',
-    description: 'Lists every item in a bundle with its own price and how much the bundle saves.',
+    description: 'Lists every item in a bundle with its own price and how much the bundle saves, in place of the Roblox included items list.',
     pages: ['item'],
-    css: listCss,
-    async run() {
+    css: `${listCss}${nativeCss('bundleitems', '.bundle-items, .container-header:has(+ .bundle-items), h2:has(+ .bundle-items)')}`,
+    run: replacing('bundleitems', async () => {
       const { kind, id } = Rk.page();
-      if (kind !== 'bundle' || !Rk.isId(id)) return;
+      if (kind !== 'bundle' || !Rk.isId(id)) return null;
       const { node, body } = openSection(itemArea(), 'Included items', { className: 'rk-avatar-bundle' });
       const meta = await itemMeta(kind, id);
       const seen = new Set();
@@ -482,7 +492,7 @@
       });
       if (!items.length) {
         node.remove();
-        return;
+        return null;
       }
       const details = await catalogDetails(items.map(item => ({ itemType: 'Asset', id: Number(item.id) })));
       let total = 0;
@@ -510,7 +520,8 @@
         el('div', { class: 'rk-avatar-list' }, rows),
         el('div', { class: 'rk-inline', style: { display: 'flex', gap: '8px 16px', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--rk-border)' } }, footer)
       );
-    }
+      return node;
+    })
   });
 
   Rk.feature({
@@ -1866,11 +1877,26 @@
       .rk-avatar-quick .rk-menu-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .rk-avatar-quick .rk-menu-item[disabled] { opacity: 0.5; pointer-events: none; }
       .rk-avatar-quick-empty { padding: 12px; font-size: 13px; color: var(--rk-muted); }
+      .rk-avatar-quick-row { display: flex; align-items: center; }
+      .rk-avatar-quick-row > .rk-menu-item { flex: 1; min-width: 0; }
+      .rk-avatar-quick-pin { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-right: 4px; padding: 0; border: 0; border-radius: var(--rk-radius); background: transparent; color: var(--rk-muted); opacity: 0.45; cursor: pointer; transition: opacity var(--rk-fast) ease, background-color var(--rk-fast) ease; }
+      .rk-avatar-quick-row:hover .rk-avatar-quick-pin { opacity: 1; }
+      .rk-avatar-quick-pin:hover { background: var(--rk-hover); }
+      .rk-avatar-quick-pin[aria-pressed="true"] { color: var(--rk-accent); opacity: 1; }
+      .rk-avatar-quick-pinned { background: var(--rk-accent-soft); }
     `,
     run(ctx) {
       let outfits = null;
       let close = null;
       let busy = false;
+      const pinnedIds = () => {
+        const saved = Rk.store.get('avatar.pinnedOutfits', []);
+        return Array.isArray(saved) ? saved.filter(id => Rk.isId(id)).slice(0, 50) : [];
+      };
+      const togglePin = id => {
+        const pins = pinnedIds();
+        Rk.store.set('avatar.pinnedOutfits', pins.includes(id) ? pins.filter(pin => pin !== id) : [...pins, id].slice(0, 50));
+      };
       const loadOutfits = async () => {
         if (outfits) return outfits;
         const user = await Rk.me();
@@ -1933,15 +1959,28 @@
         requestAnimationFrame(() => list.classList.add('rk-menu-open'));
         const saved = await loadOutfits();
         if (!list.isConnected) return;
-        if (!saved.length) {
-          list.replaceChildren(el('div', { class: 'rk-avatar-quick-empty' }, 'No saved outfits yet'));
-        } else {
-          list.replaceChildren(...saved.map(outfit => {
-            const item = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem' }, ui.thumb(Rk.thumb('Outfit', outfit.id, '150x150'), { size: 36 }), el('span', null, str(outfit.name, 100) || 'Outfit'));
+        const render = () => {
+          const pins = pinnedIds();
+          const ordered = [
+            ...pins.map(id => saved.find(outfit => outfit.id === id)).filter(Boolean),
+            ...saved.filter(outfit => !pins.includes(outfit.id))
+          ];
+          list.replaceChildren(...ordered.map(outfit => {
+            const isPinned = pins.includes(outfit.id);
+            const name = str(outfit.name, 100) || 'Outfit';
+            const item = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem' }, ui.thumb(Rk.thumb('Outfit', outfit.id, '150x150'), { size: 36 }), el('span', null, name));
             item.addEventListener('click', () => wear(outfit, item));
-            return item;
+            const pin = el('button', { type: 'button', class: 'rk-avatar-quick-pin', 'aria-pressed': isPinned ? 'true' : 'false', 'aria-label': isPinned ? `Unpin ${name}` : `Pin ${name}`, title: isPinned ? 'Unpin' : 'Pin to top' }, icon('pin', 16));
+            pin.addEventListener('click', event => {
+              event.stopPropagation();
+              togglePin(outfit.id);
+              render();
+            });
+            return el('div', { class: `rk-avatar-quick-row${isPinned ? ' rk-avatar-quick-pinned' : ''}` }, item, pin);
           }));
-        }
+        };
+        if (!saved.length) list.replaceChildren(el('div', { class: 'rk-avatar-quick-empty' }, 'No saved outfits yet'));
+        else render();
         place();
       };
       const button = ui.tip(el('a', { class: 'rk-nav-button', href: '/my/avatar', role: 'button', 'data-rk-tip-pos': 'below' }, icon('user', 22)), 'Outfits');

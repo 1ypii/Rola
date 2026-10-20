@@ -100,6 +100,16 @@
     return node;
   };
 
+  const nativeCss = (key, selector) => `html:not(.rk-show-${key}) :is(${selector}) { display: none !important; }`;
+  const replacing = (key, run) => async ctx => {
+    let placed = null;
+    try {
+      placed = await run(ctx);
+    } finally {
+      if (!placed) document.documentElement.classList.add(`rk-show-${key}`);
+    }
+  };
+
   let sectionHost = null;
   const addSection = (node, order) => {
     if (!sectionHost) {
@@ -392,13 +402,13 @@
     id: 'games.statsPanel',
     category: 'games',
     name: 'Experience insights',
-    description: 'Shows exact players, visits, favorites, like ratio, server size and dates in one panel.',
+    description: 'Shows exact players, visits, favorites, like ratio, server size and dates in one panel, in place of the Roblox stats list.',
     pages: GAME,
-    css: `${sectionsCss}${insightsCss}`,
-    async run() {
+    css: `${sectionsCss}${insightsCss}${nativeCss('gamestats', 'ul:has(> li.game-stat)')}`,
+    run: replacing('gamestats', async () => {
       const info = await gameInfo();
       const game = info && info.game;
-      if (!game) return;
+      if (!game) return null;
       const [favorites, votes] = await Promise.all([favoriteCount(), voteInfo()]);
       const playing = count(game.playing);
       const visits = count(game.visits);
@@ -418,7 +428,7 @@
         ['Favorites per 1K visits', favorites !== null && visits ? fmt.num(Math.round((favorites / visits) * 10000) / 10) : '-', { title: 'Favorites per 1,000 visits' }],
         ['Age', years !== null ? fmt.plural(years, 'year') : '-']
       ]), 1);
-    }
+    })
   });
 
   Rk.feature({
