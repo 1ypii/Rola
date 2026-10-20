@@ -1838,11 +1838,17 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
     id: 'profiles.bestFriends',
     category: 'profiles',
     name: 'Best friends',
-    description: 'Mark friends as best friends on their profile and see them in their own list above your friends.',
+    description: 'Mark friends as best friends and see them in their own row above your friends on the home page and friends page.',
     default: false,
-    pages: ['profile', 'friends'],
+    pages: ['profile', 'friends', 'home'],
     css: `${headerCss}
 .rk-friends-best-section { margin-bottom: 24px; }
+.rk-home-best { margin-bottom: 18px; }
+.rk-home-best .rk-friends-best { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.rk-home-best .rk-best-card { flex: none; width: 100px; padding: 8px 4px; background: transparent; }
+.rk-home-best .rk-best-card:hover { background: var(--rk-hover); }
+.rk-home-best .rk-best-dot { border-color: var(--rk-bg); }
+.rk-home-best .rk-best-name { font-size: 13px; }
 .rk-friends-best { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .rk-best-card { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; padding: 14px 10px 12px; border-radius: 8px; background: var(--rk-surface); color: var(--rk-text) !important; text-decoration: none !important; transition: background-color var(--rk-fast) ease; }
 .rk-best-card:hover { background: var(--rk-hover); }
@@ -1887,6 +1893,35 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         if (kept.length !== ids.length) Rk.store.set('friends.best', kept);
         return kept;
       };
+      const states = ['offline', 'online', 'game', 'studio'];
+      const cardFor = (userId, users, presence, size) => {
+        const user = users && users.get(userId);
+        const entry = presence.get(userId);
+        const state = states[presenceType(entry)] || 'offline';
+        const where = entry && typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : '';
+        const status = { online: 'Online', game: where || 'In game', studio: where ? `Studio: ${where}` : 'In Studio', offline: 'Offline' }[state];
+        const name = user ? String(user.displayName || user.name) : `User ${userId}`;
+        return el('a', { class: 'rk-best-card', href: `/users/${userId}/profile`, title: user ? `@${user.name}` : name },
+          el('span', { class: 'rk-best-face' },
+            ui.thumb(Rk.thumb('AvatarHeadShot', userId, '150x150'), { size, round: true }),
+            el('span', { class: 'rk-best-dot', dataset: { state } })
+          ),
+          el('span', { class: 'rk-best-name' }, el('span', null, name), mark(isVerified(userId, user && user.hasVerifiedBadge))),
+          el('span', { class: 'rk-best-status', dataset: { state } }, status)
+        );
+      };
+      if (Rk.page().type === 'home') {
+        const ids = await prune();
+        if (!ids.length) return;
+        const [users, presence] = await Promise.all([safe(Rk.api.users(ids)), presenceOf(ids)]);
+        const row = ui.section(`Best friends (${ids.length})`, el('div', { class: 'rk-friends-best' }, ids.map(userId => cardFor(userId, users, presence, 84))), { className: 'rk-home-best' });
+        Rk.observe('.friends-carousel-container', carousel => {
+          if (row.isConnected) return;
+          const block = carousel.parentElement && carousel.parentElement.querySelector(':scope > .container-header') ? carousel.parentElement : carousel;
+          block.before(row);
+        });
+        return;
+      }
       if (Rk.page().type === 'profile') {
         const id = profileId();
         const me = await Rk.me();
@@ -1916,7 +1951,6 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         return;
       }
       if (!await ownFriendsPage()) return;
-      const states = ['offline', 'online', 'game', 'studio'];
       const followTab = () => /follow/i.test(location.hash);
       const grid = el('div', { class: 'rk-friends-best' });
       const section = ui.section('Best friends', grid, { className: 'rk-friends-best-section' });
@@ -1930,22 +1964,7 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         }
         const [users, presence] = await Promise.all([safe(Rk.api.users(ids)), presenceOf(ids)]);
         if (bestList().join() !== ids.join()) return;
-        grid.replaceChildren(...ids.map(userId => {
-          const user = users && users.get(userId);
-          const entry = presence.get(userId);
-          const state = states[presenceType(entry)] || 'offline';
-          const where = entry && typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : '';
-          const status = { online: 'Online', game: where || 'In game', studio: where ? `Studio: ${where}` : 'In Studio', offline: 'Offline' }[state];
-          const name = user ? String(user.displayName || user.name) : `User ${userId}`;
-          return el('a', { class: 'rk-best-card', href: `/users/${userId}/profile`, title: user ? `@${user.name}` : name },
-            el('span', { class: 'rk-best-face' },
-              ui.thumb(Rk.thumb('AvatarHeadShot', userId, '150x150'), { size: 84, round: true }),
-              el('span', { class: 'rk-best-dot', dataset: { state } })
-            ),
-            el('span', { class: 'rk-best-name' }, el('span', null, name), mark(isVerified(userId, user && user.hasVerifiedBadge))),
-            el('span', { class: 'rk-best-status', dataset: { state } }, status)
-          );
-        }));
+        grid.replaceChildren(...ids.map(userId => cardFor(userId, users, presence, 84)));
       };
       const syncHearts = () => {
         const best = new Set(bestList());
