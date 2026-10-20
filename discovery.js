@@ -411,7 +411,10 @@
   const markUser = (node, userId, size = 14) => {
     Promise.all([Rk.api.users([userId]), meLoaded]).then(([users]) => {
       const user = users.get(Number(userId));
-      if (isVerified(userId, user && user.hasVerifiedBadge) && !node.querySelector('.rk-verified')) node.append(ui.verified({ size }));
+      if (!isVerified(userId, user && user.hasVerifiedBadge) || node.querySelector('.rk-verified')) return;
+      const badge = ui.verified({ size });
+      if (Rk.isEnabled('profiles.fakeVerified') && !(user && user.hasVerifiedBadge)) badge.classList.add('rk-self-badge');
+      node.append(badge);
     }, () => {});
   };
 
@@ -1274,9 +1277,14 @@
       const hour = new Date().getHours();
       const part = hour >= 5 && hour < 12 ? 'morning' : hour >= 12 && hour < 18 ? 'afternoon' : 'evening';
       const name = me ? clip(me.displayName || me.name, 60) : '';
-      const line = el('div', { class: 'rk-home-greeting' }, name ? `Good ${part}, ${name}` : `Good ${part}`);
+      const label = el('span', null, name);
+      const line = el('div', { class: 'rk-home-greeting' }, name ? [`Good ${part}, `, label] : `Good ${part}`);
+      const hideName = () => label.classList.toggle('rk-tools-streamer', Rk.isEnabled('tools.streamerMode') && Boolean(Rk.option('tools.streamerMode', 'blurName')));
       topBar().left.replaceChildren(line);
-      if (name) markUser(line, me.id, 16);
+      if (!name) return;
+      hideName();
+      Rk.onSettings(hideName);
+      markUser(line, me.id, 16);
     }
   });
 

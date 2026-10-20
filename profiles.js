@@ -1486,9 +1486,13 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
     description: 'Shows a verified badge next to your name on your profile, in the sidebar and in the top bar, in any color. Only you can see it.',
     default: false,
     options: [
-      { key: 'color', label: 'Badge color', type: 'color', default: '#0066ff' }
+      { key: 'color', label: 'Badge color', type: 'color', default: '#0066ff' },
+      { key: 'rgb', label: 'RGB badge that cycles colors', type: 'toggle', default: false }
     ],
-    css: ctx => `.rk-self-badge { --rk-verified: ${ctx.option('color')}; flex: none; margin-left: 4px; vertical-align: middle; }`,
+    css: ctx => `.rk-self-badge { --rk-verified: ${ctx.option('rgb') ? '#ff2a6d' : ctx.option('color')}; flex: none; margin-left: 4px; vertical-align: middle; }
+${ctx.option('rgb') ? `.rk-self-badge .rk-verified-shape { animation: rk-rgb-badge 3s linear infinite; }
+@keyframes rk-rgb-badge { to { filter: hue-rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rk-self-badge .rk-verified-shape { animation: none; } }` : ''}`,
     async run() {
       const me = await Rk.me();
       const display = me ? String(me.displayName || me.name).trim() : '';
