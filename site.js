@@ -500,25 +500,14 @@
       };
       const apply = () => {
         queued = false;
-        const container = document.getElementById('chat-container');
+        const container = document.getElementById('chat-container') || document.querySelector('.react-chat-root') || document.body;
         if (!container) return;
         const on = Rk.isEnabled(ctx.id);
         const ids = on ? bestIds() : new Set();
         if (on) loadPeople(ids);
         const lists = new Map();
-        for (const title of container.querySelectorAll('.react-chat-row-title')) {
-          if (title.closest('.react-chat-dialog-shell')) continue;
-          let row = title;
-          while (row.parentElement && row.parentElement !== container && row.parentElement.querySelectorAll('.react-chat-row-title').length < 2) row = row.parentElement;
-          const list = row.parentElement;
-          if (!list || list === container) continue;
-          if (!lists.has(list)) lists.set(list, []);
-          lists.get(list).push(row);
-        }
-        for (const row of container.querySelectorAll('li:not(.rk-chat-label)')) {
-          if (row.closest('.react-chat-dialog-shell') || row.querySelector('.react-chat-row-title')) continue;
-          if (!lists.has(row.parentElement)) lists.set(row.parentElement, []);
-          lists.get(row.parentElement).push(row);
+        for (const list of container.querySelectorAll('.react-chat-thread-list, [data-testid="react-chat-thread-list"]')) {
+          lists.set(list, [...list.querySelectorAll(':scope > .react-chat-row')]);
         }
         for (const [list, rows] of lists) {
           let found = false;
@@ -541,7 +530,7 @@
         queued = true;
         requestAnimationFrame(apply);
       };
-      Rk.observe('#chat-container', container => {
+      Rk.observe('.react-chat-thread-list, [data-testid="react-chat-thread-list"]', container => {
         new MutationObserver(records => {
           if (records.every(record => [...record.addedNodes, ...record.removedNodes].every(node => node.nodeType === 1 && node.classList.contains('rk-chat-label')))) return;
           schedule();
