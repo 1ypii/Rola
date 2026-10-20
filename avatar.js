@@ -1353,7 +1353,16 @@
       let reverted = false;
       let checking = false;
       let again = false;
-      let timer = 0;
+      const syncFlag = () => {
+        document.documentElement.dataset.rkKeepR6 = Rk.isEnabled(ctx.id) && type === 'R6' ? 'on' : 'off';
+      };
+      const typeControl = label => [...editor.querySelectorAll(controls)].find(node => node.textContent.trim() === label) || null;
+      const showR6 = () => {
+        const control = typeControl('R6');
+        if (control && control.getAttribute('aria-selected') !== 'true' && control.getAttribute('aria-checked') !== 'true') control.click();
+      };
+      syncFlag();
+      Rk.onSettings(syncFlag);
       editor.addEventListener('pointerdown', event => {
         if (!event.isTrusted) return;
         const target = event.target instanceof Element ? event.target.closest(controls) : null;
@@ -1361,11 +1370,11 @@
         if (text === 'R6' || text === 'R15') {
           type = text;
           reverted = false;
-          return;
+          syncFlag();
         }
-        clearTimeout(timer);
-        timer = setTimeout(() => check(), 1500);
       }, true);
+      document.addEventListener('rk:avatar-kept', () => setTimeout(showR6));
+      document.addEventListener('rk:avatar-wearing', () => check());
       const check = async () => {
         if (!Rk.isEnabled(ctx.id)) return;
         if (checking) {
@@ -1382,19 +1391,23 @@
             ui.toast('Roblox needs R15 for what you equipped', { tone: 'warning' });
           } else {
             reverted = true;
-            await Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: 'R6' }).catch(() => null);
+            const control = typeControl('R6');
+            if (control) control.click();
+            else await Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: 'R6' }).catch(() => null);
             const after = avatarType(await Rk.api.get(AVATAR_URL).catch(() => null));
             if (after === 'R6') {
-              ui.toast('Kept you on R6, reload the editor to see it', { tone: 'success' });
+              if (!control) ui.toast('Kept you on R6, reload the editor to see it', { tone: 'success' });
             } else {
               type = 'R15';
               reverted = false;
+              syncFlag();
               ui.toast('Roblox requires R15 for that head, so it could not stay on R6', { tone: 'warning', duration: 6000 });
             }
           }
         } else if (current) {
           if (current === type) reverted = false;
           else if (!reverted) type = current;
+          syncFlag();
         }
         if (again) {
           again = false;
