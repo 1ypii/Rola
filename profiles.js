@@ -1045,7 +1045,7 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
 .rk-profile-banner > img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 400ms ease; }
 .rk-profile-banner > img.rk-profile-banner-loaded { opacity: 1; }
 .rk-banner-host { background-image: var(--rk-profile-banner) !important; background-size: cover !important; background-repeat: no-repeat !important; background-position: var(--rk-profile-banner-focus, center) !important; }
-.rk-banner-host :is(.thumbnail-3d-container, .thumbnail-2d-container, [class*="thumbnail-holder"], canvas) { background: transparent !important; }
+.rk-banner-host :is(.thumbnail-3d-container, .thumbnail-2d-container, [class*="thumbnail-holder"], canvas, .rk-banner-clear) { background: transparent !important; }
 `,
     async run(ctx) {
       const onAvatar = Rk.page().type === 'avatar';
@@ -1057,9 +1057,25 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       let token = null;
       let data = null;
       let host = null;
+      const painted = el => {
+        const style = getComputedStyle(el);
+        return style.backgroundImage !== 'none' || !/rgba\(0, 0, 0, 0\)|transparent/.test(style.backgroundColor);
+      };
+      const large = el => {
+        const rect = el.getBoundingClientRect();
+        return rect.width >= 300 && rect.height >= 150;
+      };
+      const clearInside = () => {
+        if (!host || !data) return;
+        for (const node of host.querySelectorAll('*')) {
+          if (node.classList.contains('rk-banner-clear') || node.matches('button, a, img, canvas, svg, svg *')) continue;
+          if (large(node) && painted(node)) node.classList.add('rk-banner-clear');
+        }
+      };
       const paint = () => {
         if (host) {
           host.classList.toggle('rk-banner-host', Boolean(data));
+          clearInside();
           if (data) {
             host.style.setProperty('--rk-profile-banner', `url("${data}")`);
             host.style.setProperty('--rk-profile-banner-focus', `center ${ctx.option('position')}`);
@@ -1105,7 +1121,8 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
           if (rect.width >= 300 && rect.height >= 150) break;
         }
         if (box === document.body || box.contains(document.querySelector('.user-profile-header'))) return;
-        host = box;
+        host = [box, ...box.querySelectorAll('*')].find(node => !node.matches('button, a, img, canvas, svg, svg *') && large(node) && painted(node)) || box;
+        new MutationObserver(clearInside).observe(host, { childList: true, subtree: true });
         paint();
       });
     }
