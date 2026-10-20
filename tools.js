@@ -1690,9 +1690,9 @@
       });
       const notice = 'Rola streamer mode';
       const ipPattern = /\b\d{1,3}(?:\.\d{1,3}){3}\b|\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}\b/gi;
-      const replaceLabels = /^(email|email address|phone|phone number|account location|location)$/i;
-      const hideLabels = /^(birthday|date of birth|age group|previous usernames?|past usernames?)$/i;
-      const sessionHeadings = /^(where you('|’)re logged in|sessions|active sessions|logged in devices|devices)$/i;
+      const replaceLabels = /^(email|email address|phone|phone number|account location|location)\s*:?$/i;
+      const hideLabels = /^(birthday|date of birth|age group|previous usernames?|past usernames?)\s*:?$/i;
+      const sessionHeadings = /^(where you('|’)re logged in|sessions|active sessions|logged in devices)\s*:?$/i;
       const masked = new Map();
       const hidden = new Set();
       let queued = false;
@@ -1731,11 +1731,29 @@
           if (ipPattern.test(text.nodeValue)) setText(text, text.nodeValue.replace(ipPattern, notice));
         }
         if (!accountPage()) return;
+        for (const label of document.querySelectorAll('#react-user-account-base .account-info-inline-label')) {
+          const value = label.textContent.trim();
+          const row = label.closest('.settings-text-field-container') || rowOf(label);
+          if (hideLabels.test(value)) {
+            row.classList.add('rk-tools-private');
+            hidden.add(row);
+          } else if (replaceLabels.test(value)) {
+            maskRow(row, label);
+          }
+        }
+        for (const line of document.querySelectorAll('#session-management li .text-truncate-split')) {
+          for (const text of textNodes(line)) if (text.nodeValue.trim()) setText(text, notice);
+        }
         for (const text of textNodes(root)) {
           const value = text.nodeValue.trim();
           if (!value || value.length > 40) continue;
           const label = text.parentElement;
-          if (hideLabels.test(value)) {
+          const inline = /^(email|phone|phone number|account location|location)\s*:\s*\S/i.exec(value);
+          if (inline) {
+            setText(text, `${value.slice(0, value.indexOf(':') + 1)} ${notice}`);
+            continue;
+          }
+          if (hideLabels.test(value) || /^(birthday|date of birth|age group)\s*:\s*\S/i.test(value)) {
             const row = rowOf(label);
             row.classList.add('rk-tools-private');
             hidden.add(row);
