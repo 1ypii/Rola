@@ -563,9 +563,26 @@
     }
     const list = el('div', { class: 'rk-tools-terms-list' }, ui.spinner());
     const history = el('div', { class: 'rk-tools-terms-list' });
-    const field = ui.input({ placeholder: 'Username or user id', maxLength: 40, onEnter: () => add() });
+    const field = ui.input({ placeholder: 'Usernames or ids, separated by commas', maxLength: 2000, onEnter: () => add() });
+    const selected = new Set();
+    const selectAll = ui.button('Select all', { variant: 'ghost', onClick: () => {
+      const ids = watchedIds();
+      const every = ids.length && ids.every(id => selected.has(id));
+      selected.clear();
+      if (!every) for (const id of ids) selected.add(id);
+      render();
+    } });
+    const removeSelected = ui.button('Remove selected', { variant: 'ghost', onClick: () => {
+      if (!selected.size) return;
+      saveWatched(watchedIds().filter(id => !selected.has(id)), watchedNames());
+      selected.clear();
+      render();
+    } });
     const render = async () => {
       const ids = watchedIds();
+      for (const id of [...selected]) if (!ids.includes(id)) selected.delete(id);
+      removeSelected.disabled = !selected.size;
+      selectAll.querySelector('span').textContent = ids.length && ids.every(id => selected.has(id)) ? 'Select none' : 'Select all';
       const status = await Rk.bg('terms').catch(() => null);
       const users = status && status.users && typeof status.users === 'object' ? status.users : {};
       const log = status && Array.isArray(status.log) ? status.log.filter(entry => entry && Rk.isId(entry.userId)) : [];
@@ -577,8 +594,16 @@
           saveWatched(watchedIds().filter(item => item !== id), watchedNames());
           render();
         } });
+        const pick = el('input', { type: 'checkbox', class: 'rk-tools-terms-pick', 'aria-label': `Select ${name}` });
+        pick.checked = selected.has(id);
+        pick.addEventListener('change', () => {
+          if (pick.checked) selected.add(id);
+          else selected.delete(id);
+          render();
+        });
         return ui.row(
           [
+            pick,
             banned ? el('span', { class: 'rk-tools-terms-gone' }, icon('user', 18)) : ui.thumb(Rk.thumb('AvatarHeadShot', id, '48x48', { circular: true }), { size: 36, round: true }),
             el('div', { class: 'rk-tools-person' },
               ui.link(`/users/${id}/profile`, name),
@@ -599,28 +624,20 @@
     const add = async () => {
       const text = field.value.trim();
       if (!text) return;
-      let id = /^\d{1,20}$/.test(text) ? Number(text) : null;
-      let name = null;
-      if (!id) {
-        const json = await Rk.api.post('https://users.roblox.com/v1/usernames/users', { usernames: [text], excludeBannedUsers: false }).catch(() => null);
-        const user = json && Array.isArray(json.data) ? json.data.find(item => item && Rk.isId(item.id)) : null;
-        id = user ? user.id : null;
-        name = user && typeof user.name === 'string' ? user.name : null;
-      }
-      if (!Rk.isId(id)) {
-        ui.toast('Could not find that user', { tone: 'warning' });
-        return;
-      }
+      const found = await resolveWatched(text);
       const ids = watchedIds();
-      if (ids.includes(id)) {
-        ui.toast('Already on your watchlist', { tone: 'warning' });
+      const fresh = found.ids.filter(id => !ids.includes(id));
+      if (!fresh.length) {
+        ui.toast(found.ids.length ? 'Already on your watchlist' : 'Could not find those users', { tone: 'warning' });
         return;
       }
-      if (ids.length >= 100) {
+      const room = 100 - ids.length;
+      if (room <= 0) {
         ui.toast('You can watch up to 100 users', { tone: 'warning' });
         return;
       }
-      saveWatched([...ids, id], name ? { ...watchedNames(), [id]: name } : watchedNames());
+      if (fresh.length > room) ui.toast(`Only ${room} more fit, you can watch up to 100 users`, { tone: 'warning' });
+      saveWatched([...ids, ...fresh.slice(0, room)], found.names);
       field.value = '';
       await render();
       setTimeout(() => Rk.bg('poll-now').then(render, () => {}), 600);
@@ -630,7 +647,7 @@
       width: 560,
       content: [
         el('div', { class: 'rk-inline rk-tools-terms-add' }, field, ui.button('Add', { variant: 'primary', onClick: add })),
-        el('h3', { class: 'rk-tools-terms-heading' }, 'Watching'),
+        el('div', { class: 'rk-tools-terms-bar' }, el('h3', { class: 'rk-tools-terms-heading' }, 'Watching'), el('div', { class: 'rk-inline' }, selectAll, removeSelected)),
         list,
         el('h3', { class: 'rk-tools-terms-heading' }, 'History'),
         history
@@ -2025,9 +2042,67 @@
       .rk-tools-terms-list .rk-row-side { display: flex; align-items: center; gap: 6px; }
       .rk-tools-terms-gone { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--rk-shift); color: var(--rk-muted); }
       .rk-tools-person { display: flex; flex-direction: column; min-width: 0; }
+      .rk-tools-terms-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+      .rk-tools-terms-pick { flex: none; width: 16px; height: 16px; margin: 0 4px 0 0; accent-color: var(--rk-accent); cursor: pointer; }
+      .rk-tools-terms-pops { position: fixed; right: 20px; bottom: 20px; z-index: 2147483000; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+      .rk-tools-terms-pop { display: flex; align-items: center; gap: 10px; width: 300px; padding: 10px 12px; border: 1px solid var(--rk-border); border-radius: var(--rk-radius-l); background: var(--rk-bg); box-shadow: var(--rk-shadow); color: var(--rk-text); font-family: var(--rk-font); pointer-events: auto; animation: rk-rise var(--rk-med) var(--rk-ease) both; transition: opacity var(--rk-med) ease, transform var(--rk-med) var(--rk-ease); }
+      .rk-tools-terms-pop.rk-tools-terms-leaving { opacity: 0; transform: translateY(6px); }
+      .rk-tools-terms-pop .rk-tools-person { flex: 1; }
+      .rk-tools-terms-pop strong { overflow: hidden; color: var(--rk-text-strong); font-size: 14px; white-space: nowrap; text-overflow: ellipsis; }
+      .rk-tools-terms-pop-danger strong { color: var(--rk-danger); }
     `,
     run(ctx) {
       pollNow();
+      const seenKey = 'rk-tools-terms-seen';
+      let seen = Number(session.get(seenKey)) || 0;
+      let primed = Boolean(seen);
+      let pops = null;
+      const popup = entry => {
+        if (!pops || !pops.isConnected) {
+          pops = el('div', { class: 'rk-tools-terms-pops' });
+          document.body.append(pops);
+        }
+        const terminated = entry.event === 'terminated';
+        const name = clip(entry.displayName, 60) || clip(entry.name, 40) || `User ${entry.userId}`;
+        const card = el('div', { class: `rk-tools-terms-pop${terminated ? ' rk-tools-terms-pop-danger' : ''}`, role: 'status' },
+          ui.thumb(Rk.thumb('AvatarHeadShot', entry.userId, '48x48', { circular: true }), { size: 36, round: true }),
+          el('div', { class: 'rk-tools-person' },
+            el('strong', null, terminated ? `${name} was terminated` : `${name} is back`),
+            el('span', { class: 'rk-muted' }, clip(entry.name, 40) ? `@${clip(entry.name, 40)}` : '')
+          ),
+          ui.link(`/users/${entry.userId}/profile`, 'View')
+        );
+        pops.append(card);
+        setTimeout(() => {
+          card.classList.add('rk-tools-terms-leaving');
+          setTimeout(() => card.remove(), 300);
+        }, 10000);
+      };
+      const showNew = log => {
+        if (!primed) return;
+        const fresh = (Array.isArray(log) ? log : []).filter(entry => entry && Rk.isId(entry.userId) && Number(entry.time) > seen && (entry.event === 'terminated' || entry.event === 'returned'));
+        if (!fresh.length) return;
+        seen = Math.max(...fresh.map(entry => Number(entry.time)));
+        session.set(seenKey, String(seen));
+        if (!Rk.isEnabled(ctx.id)) return;
+        Rk.domReady.then(() => {
+          for (const entry of fresh.slice(0, 3).reverse()) popup(entry);
+        });
+      };
+      chrome.storage.local.get('rkbg:terms').then(saved => {
+        const log = saved['rkbg:terms'] && Array.isArray(saved['rkbg:terms'].log) ? saved['rkbg:terms'].log : [];
+        if (!seen) {
+          seen = Math.max(0, ...log.map(entry => Number(entry && entry.time) || 0));
+          session.set(seenKey, String(seen));
+        }
+        primed = true;
+      }).catch(() => {
+        primed = true;
+      });
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes['rkbg:terms'] || !changes['rkbg:terms'].newValue) return;
+        showNew(changes['rkbg:terms'].newValue.log);
+      });
       let latest = 0;
       const sync = async () => {
         if (!Rk.isEnabled(ctx.id)) return;

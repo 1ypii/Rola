@@ -687,9 +687,55 @@
     return all && typeof all === 'object' && Array.isArray(all[id]) ? all[id] : [];
   };
 
+  const ROLA_BADGES = [['creator', 'Creator'], ['contributor', 'Contributor'], ['donator', 'Donator']];
+
+  const badgeCard = (userId, current) => {
+    const body = el('div', { class: 'rk-admin-card-body' });
+    const card = el('section', { class: 'rk-admin-card' }, el('div', { class: 'rk-admin-card-head' }, 'Rola Badges'), body);
+    const showToken = () => {
+      const field = ui.input({ type: 'password', placeholder: 'GitHub token', maxLength: 300 });
+      body.replaceChildren(
+        el('div', { class: 'rk-admin-empty' }, 'Badges are saved to badges.json in the Rola repo so every Rola user sees them. Paste a fine-grained GitHub token with Contents read and write access to 1ypii/Rola. It stays on this browser only.'),
+        field,
+        ui.button('Save token', { variant: 'primary', onClick: async () => {
+          const token = field.value.trim();
+          if (!/^[A-Za-z0-9_]{20,255}$/.test(token)) {
+            ui.toast('That does not look like a GitHub token', { tone: 'warning' });
+            return;
+          }
+          await chrome.storage.local.set({ 'rk:gh-token': token });
+          showBadges();
+        } })
+      );
+    };
+    const showBadges = () => {
+      const chosen = new Set(current);
+      body.replaceChildren(
+        ...ROLA_BADGES.map(([key, label]) => el('div', { class: 'rk-admin-row' },
+          el('span', { class: 'rk-admin-label' }, label),
+          ui.toggle(chosen.has(key), on => (on ? chosen.add(key) : chosen.delete(key)), { label })
+        )),
+        el('div', { class: 'rk-inline' },
+          ui.button('Save badges', { variant: 'primary', onClick: async () => {
+            try {
+              await Rk.bg('save-badges', { userId, badges: [...chosen] });
+              current = [...chosen];
+              ui.toast('Badges saved, every Rola user sees them within about 30 minutes', { tone: 'success' });
+            } catch (err) {
+              ui.toast(`Could not save badges: ${err && err.message ? err.message : 'unknown error'}`, { tone: 'danger', duration: 7000 });
+            }
+          } }),
+          ui.button('Change token', { variant: 'ghost', onClick: showToken })
+        )
+      );
+    };
+    chrome.storage.local.get('rk:gh-token').then(saved => (saved['rk:gh-token'] ? showBadges() : showToken()), showToken);
+    return card;
+  };
+
   const adminProfile = async id => {
     const safe = promise => Promise.resolve(promise).catch(() => null);
-    const [user, groups, games, presence, history, friends, followers, following] = await Promise.all([
+    const [user, groups, games, presence, history, friends, followers, following, badges] = await Promise.all([
       safe(Rk.api.get(`https://users.roblox.com/v1/users/${id}`)),
       safe(Rk.api.get(`https://groups.roblox.com/v2/users/${id}/groups/roles`)),
       safe(Rk.api.get(`https://games.roblox.com/v2/users/${id}/games?accessFilter=Public&limit=50&sortOrder=Desc`)),
@@ -697,7 +743,8 @@
       safe(Rk.api.get(`https://users.roblox.com/v1/users/${id}/username-history?limit=50&sortOrder=Desc`)),
       safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/friends/count`)),
       safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followers/count`)),
-      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followings/count`))
+      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followings/count`)),
+      safe(Rk.bg('rola-badges'))
     ]);
     if (!user || !Rk.isId(user.id)) return el('div', { class: 'rk-admin-empty' }, 'No user found');
     const entry = presence && Array.isArray(presence.userPresences) ? presence.userPresences[0] : null;
@@ -755,6 +802,7 @@
       el('div', { class: 'rk-admin-column' },
         adminCard(`Groups (${groupRows.length})`, adminTable(['Group', 'Role', 'Members'], groupRows)),
         adminCard('User Notes', noteField, ui.button('Add Note', { variant: 'primary', onClick: addNote }), noteList),
+        badgeCard(user.id, badges && Array.isArray(badges[user.id]) ? badges[user.id] : []),
         adminCard(`Past Usernames (${names.length})`, names.length ? el('div', { class: 'rk-inline' }, names.map(name => el('span', { class: 'rk-admin-tag' }, name))) : el('div', { class: 'rk-admin-empty' }, 'None'))
       )
     );

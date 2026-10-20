@@ -1997,13 +1997,52 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         past = Boolean(last && !last.isIntersecting && rect && rect.bottom < 0);
         sync();
       });
-      Rk.observe('.user-profile-header', header => {
-        if (header === watched) return;
-        watched = header;
+      const watch = target => {
+        if (target === watched) return;
+        watched = target;
         io.disconnect();
-        io.observe(header);
+        io.observe(target);
+      };
+      const joinButton = header => [...header.querySelectorAll('button, a')].find(node => /^(join|play)$/i.test(node.textContent.trim()) && !bar.contains(node));
+      Rk.observe('.user-profile-header', header => {
+        watch(joinButton(header) || header);
+        new MutationObserver(() => {
+          const button = joinButton(header);
+          if (button) watch(button);
+        }).observe(header, { childList: true, subtree: true });
       });
       Rk.onSettings(sync);
+    }
+  });
+
+  const ROLA_BADGES = [
+    ['creator', 'Creator', 'star', 'Rola Creator'],
+    ['contributor', 'Contributor', 'edit', 'Rola Contributor'],
+    ['donator', 'Donator', 'heart', 'Rola Donator']
+  ];
+
+  Rk.feature({
+    id: 'profiles.rolaBadges',
+    category: 'profiles',
+    name: 'Rola badges',
+    description: 'Shows Rola Creator, Contributor and Donator badges under the name of people who have them.',
+    pages: PROFILE,
+    css: `${statusCss}
+.rk-rola-badge { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; cursor: default; }
+.rk-rola-badge-creator { color: #f5b300; }
+.rk-rola-badge-contributor { color: #3b82f6; }
+.rk-rola-badge-donator { color: #ec4899; }
+.rk-rola-badge .rk-icon { fill: currentColor; }
+`,
+    async run() {
+      const id = profileId();
+      if (!id) return;
+      const all = await Rk.bg('rola-badges').catch(() => null);
+      const owned = all && typeof all === 'object' && Array.isArray(all[id]) ? all[id] : [];
+      const badges = ROLA_BADGES.filter(([key]) => owned.includes(key));
+      badges.forEach(([key, label, iconName, tip], index) => {
+        addStatus(ui.tip(el('span', { class: `rk-profile-state rk-rola-badge rk-rola-badge-${key}` }, icon(iconName, 14), label), tip), 6 + index);
+      });
     }
   });
 
@@ -2322,12 +2361,12 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
     id: 'profiles.quickUnfriend',
     category: 'profiles',
     name: 'Quick unfriend',
-    description: 'Adds an unfriend button to the cards on your friends list.',
+    description: 'Adds a trash button to the cards on your friends list that unfriends them right away.',
     default: false,
     pages: FRIENDS,
     css: `
 .rk-friends-unfriendable { position: relative; }
-.rk-friends-unfriend { position: absolute; bottom: 10px; left: 10px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: var(--rk-shift); color: var(--rk-muted); font-family: var(--rk-font); font-size: 12px; font-weight: 600; cursor: pointer; opacity: 0; transition: opacity var(--rk-fast) ease, color var(--rk-fast) ease, background-color var(--rk-fast) ease; }
+.rk-friends-unfriend { position: absolute; bottom: 8px; left: 8px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px; background: var(--rk-shift); color: var(--rk-muted); cursor: pointer; opacity: 0; transition: opacity var(--rk-fast) ease, color var(--rk-fast) ease, background-color var(--rk-fast) ease; }
 .rk-friends-unfriendable:hover > .rk-friends-unfriend, .rk-friends-unfriend:focus-visible { opacity: 1; }
 .rk-friends-unfriend:hover { background: var(--rk-danger-soft); color: var(--rk-danger); }
 .rk-friends-unfriend[disabled] { opacity: 0.5; pointer-events: none; }
@@ -2347,14 +2386,12 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
             continue;
           }
           if (!button) {
-            button = el('button', { type: 'button', class: 'rk-friends-unfriend' }, icon('close', 12), 'Unfriend');
+            button = el('button', { type: 'button', class: 'rk-friends-unfriend', title: 'Unfriend', 'aria-label': 'Unfriend' }, icon('trash', 15));
             button.addEventListener('click', async event => {
               event.preventDefault();
               event.stopPropagation();
               const id = Number(button.dataset.userId);
               const name = button.dataset.name || 'this friend';
-              const confirmed = await ui.confirm(`${name} will be removed from your friends.`, { title: 'Unfriend', confirmLabel: 'Unfriend', danger: true });
-              if (!confirmed) return;
               button.disabled = true;
               const result = await safe(Rk.api.post(`https://friends.roblox.com/v1/users/${id}/unfriend`, {}));
               button.disabled = false;

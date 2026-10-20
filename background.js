@@ -692,6 +692,49 @@ const serverRegion = async ({ placeId, jobId } = {}) => {
   return label ? { label } : { reason: 'Unknown region', detail: `No location found for ${address.split('.').slice(0, 3).join('.')}.x` };
 };
 
+const BADGE_TYPES = ['creator', 'contributor', 'donator'];
+let badgeCache = null;
+
+const cleanBadges = users => {
+  const clean = {};
+  for (const [id, list] of Object.entries(users && typeof users === 'object' ? users : {})) {
+    if (!/^\d{1,15}$/.test(id) || !Array.isArray(list)) continue;
+    const kept = BADGE_TYPES.filter(type => list.includes(type));
+    if (kept.length) clean[id] = kept;
+  }
+  return clean;
+};
+
+const rolaBadges = async () => {
+  if (badgeCache && Date.now() - badgeCache.at < 1800000) return badgeCache.users;
+  const json = await fetch('https://raw.githubusercontent.com/1ypii/Rola/main/badges.json', { credentials: 'omit', cache: 'no-cache' }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+  const users = cleanBadges(json && json.users);
+  badgeCache = { at: Date.now(), users };
+  return users;
+};
+
+const saveBadges = async ({ userId, badges } = {}) => {
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !Array.isArray(badges)) throw new Error('bad badge request');
+  const token = (await chrome.storage.local.get('rk:gh-token'))['rk:gh-token'];
+  if (typeof token !== 'string' || !token) throw new Error('missing token');
+  const api = 'https://api.github.com/repos/1ypii/Rola/contents/badges.json';
+  const headers = { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' };
+  const current = await fetch(api, { headers, credentials: 'omit', cache: 'no-store' });
+  if (!current.ok) throw new Error(`github read failed ${current.status}`);
+  const file = await current.json();
+  const decoded = new TextDecoder().decode(Uint8Array.from(atob(String(file.content || '').replace(/\s/g, '')), char => char.charCodeAt(0)));
+  const users = cleanBadges((JSON.parse(decoded) || {}).users);
+  const kept = BADGE_TYPES.filter(type => badges.includes(type));
+  if (kept.length) users[userId] = kept;
+  else delete users[userId];
+  const text = `${JSON.stringify({ users }, null, 2)}\n`;
+  const content = encodeBytes(new TextEncoder().encode(text).buffer);
+  const saved = await fetch(api, { method: 'PUT', headers: { ...headers, 'content-type': 'application/json' }, credentials: 'omit', body: JSON.stringify({ message: '', content, sha: file.sha }) });
+  if (!saved.ok) throw new Error(`github write failed ${saved.status}`);
+  badgeCache = { at: Date.now(), users };
+  return users;
+};
+
 const handlers = {
   values: () => loadValues(),
   notify: payload => {
@@ -702,6 +745,8 @@ const handlers = {
   download: payload => download(payload || {}),
   'image-data': payload => imageData(payload || {}),
   regions: () => regionList(),
+  'rola-badges': () => rolaBadges(),
+  'save-badges': payload => saveBadges(payload || {}),
   'server-region': payload => serverRegion(payload || {}),
   sound: payload => playSound(payload).then(() => true),
   music: () => syncMusic(),
