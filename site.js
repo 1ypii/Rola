@@ -2149,44 +2149,45 @@
       .rk-people-hit {
         list-style: none;
         border-bottom: 1px solid var(--rk-border);
-        background: var(--rk-hover);
         animation: rk-fade var(--rk-fast) ease both;
       }
-      .rk-people-hit-link {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        padding: 10px 14px;
+      .dropdown-menu > .rk-people-hit > a.rk-people-hit-link {
+        display: flex !important;
+        align-items: center !important;
+        gap: 10px;
+        height: auto !important;
+        min-height: 38px;
+        padding: 6px 12px !important;
         color: var(--rk-text) !important;
         text-decoration: none !important;
+        white-space: nowrap;
         transition: background-color var(--rk-fast) ease;
       }
-      .rk-people-hit-link:hover {
-        background: var(--rk-hover);
+      .dropdown-menu > .rk-people-hit > a.rk-people-hit-link:hover {
+        background: var(--rk-hover) !important;
       }
       .rk-people-hit .rk-thumb {
         flex: none;
-        box-shadow: 0 0 0 3px var(--rk-accent);
-      }
-      .rk-people-hit-text {
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
+        width: 24px !important;
+        height: 24px !important;
+        box-shadow: 0 0 0 2px var(--rk-accent);
       }
       .rk-people-hit-name {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 4px;
+        min-width: 0;
         overflow: hidden;
-        font-size: 18px;
+        font-size: 14px;
         font-weight: 700;
         color: var(--rk-accent);
-        white-space: nowrap;
         text-overflow: ellipsis;
       }
       .rk-people-hit-user {
+        overflow: hidden;
         font-size: 14px;
         color: var(--rk-muted);
+        text-overflow: ellipsis;
       }
     `,
     run(ctx) {
@@ -2207,11 +2208,9 @@
         if (hit) hit.remove();
         hit = el('li', { class: 'rk-people-hit', role: 'presentation' },
           el('a', { class: 'rk-people-hit-link', role: 'menuitem', href: `/users/${user.id}/profile`, onpointerdown: event => event.preventDefault() },
-            ui.thumb(Rk.thumb('AvatarHeadShot', user.id, '150x150'), { size: 52, round: true }),
-            el('span', { class: 'rk-people-hit-text' },
-              el('span', { class: 'rk-people-hit-name' }, user.displayName, user.verified ? ui.verified({ size: 18 }) : null),
-              el('span', { class: 'rk-people-hit-user' }, `@${user.name}`)
-            )
+            ui.thumb(Rk.thumb('AvatarHeadShot', user.id, '150x150'), { size: 24, round: true }),
+            el('span', { class: 'rk-people-hit-name' }, user.displayName, user.verified ? ui.verified({ size: 14 }) : null),
+            el('span', { class: 'rk-people-hit-user' }, `@${user.name}`)
           )
         );
         menu.prepend(hit);
