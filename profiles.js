@@ -1044,6 +1044,8 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
 .rk-profile-banner { position: relative; flex: 0 0 100%; width: 100%; margin: 0 0 16px; overflow: hidden; border-radius: var(--rk-radius-l); background: var(--rk-shift); transition: height var(--rk-fast) var(--rk-ease); }
 .rk-profile-banner > img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 400ms ease; }
 .rk-profile-banner > img.rk-profile-banner-loaded { opacity: 1; }
+.rk-banner-host { background-image: var(--rk-profile-banner) !important; background-size: cover !important; background-repeat: no-repeat !important; background-position: var(--rk-profile-banner-focus, center) !important; }
+.rk-banner-host :is(.thumbnail-3d-container, .thumbnail-2d-container, [class*="thumbnail-holder"], canvas) { background: transparent !important; }
 `,
     async run(ctx) {
       const onAvatar = Rk.page().type === 'avatar';
@@ -1053,18 +1055,34 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       image.addEventListener('load', () => image.classList.add('rk-profile-banner-loaded'));
       image.addEventListener('error', () => banner.classList.add('rk-hidden'));
       let token = null;
+      let data = null;
+      let host = null;
+      const paint = () => {
+        if (host) {
+          host.classList.toggle('rk-banner-host', Boolean(data));
+          if (data) {
+            host.style.setProperty('--rk-profile-banner', `url("${data}")`);
+            host.style.setProperty('--rk-profile-banner-focus', `center ${ctx.option('position')}`);
+          } else {
+            host.style.removeProperty('--rk-profile-banner');
+          }
+        }
+        banner.classList.toggle('rk-hidden', !data || Boolean(host));
+      };
       const apply = async () => {
         banner.style.height = `${ctx.option('height')}px`;
         image.style.objectPosition = `center ${ctx.option('position')}`;
         const next = Rk.isEnabled(ctx.id) ? ctx.option('image') : '';
-        if (next === token) return;
-        token = next;
-        const data = next ? await Rk.images.get(ctx.id, 'image') : null;
-        if (token !== next) return;
-        banner.classList.toggle('rk-hidden', !data);
-        image.classList.remove('rk-profile-banner-loaded');
-        if (data) image.src = data;
-        else image.removeAttribute('src');
+        if (next !== token) {
+          token = next;
+          const loaded = next ? await Rk.images.get(ctx.id, 'image') : null;
+          if (token !== next) return;
+          data = loaded;
+          image.classList.remove('rk-profile-banner-loaded');
+          if (data) image.src = data;
+          else image.removeAttribute('src');
+        }
+        paint();
       };
       apply();
       Rk.onSettings(apply);
@@ -1077,6 +1095,18 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       }
       Rk.observe('.user-profile-header', header => {
         if (banner.nextElementSibling !== header) header.before(banner);
+      });
+      Rk.observe('.thumbnail-3d-container, .avatar-toggle-button, .enable-three-dee', node => {
+        if (host && host.isConnected) return;
+        let box = node;
+        for (let depth = 0; depth < 6 && box.parentElement; depth += 1) {
+          box = box.parentElement;
+          const rect = box.getBoundingClientRect();
+          if (rect.width >= 300 && rect.height >= 150) break;
+        }
+        if (box === document.body || box.contains(document.querySelector('.user-profile-header'))) return;
+        host = box;
+        paint();
       });
     }
   });

@@ -1462,6 +1462,159 @@
   cursor: pointer;
 }
 
+.rk-admin-search {
+  display: flex;
+  gap: 8px;
+  max-width: 420px;
+  margin: 8px 0 16px;
+}
+
+.rk-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.rk-admin-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.rk-admin-card {
+  overflow: hidden;
+  border: 1px solid var(--rk-border);
+  border-radius: var(--rk-radius);
+  background: var(--rk-surface);
+}
+
+.rk-admin > .rk-admin-card {
+  max-width: 360px;
+}
+
+.rk-admin-card-head {
+  padding: 10px 14px;
+  background: var(--rk-accent);
+  color: var(--rk-accent-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.rk-admin-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.rk-admin-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rk-border);
+  font-size: 14px;
+}
+
+.rk-admin-label {
+  font-weight: 700;
+  color: var(--rk-text-strong);
+}
+
+.rk-admin-value {
+  min-width: 0;
+  text-align: right;
+  color: var(--rk-text);
+  overflow-wrap: anywhere;
+}
+
+.rk-admin-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--rk-accent-soft);
+  color: var(--rk-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rk-admin-good {
+  color: var(--rk-success);
+  font-weight: 700;
+}
+
+.rk-admin-bad {
+  color: var(--rk-danger);
+  font-weight: 700;
+}
+
+.rk-admin-bio {
+  margin: 0;
+  font-size: 14px;
+  color: var(--rk-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rk-admin-person {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.rk-admin-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rk-admin a {
+  color: var(--rk-accent);
+}
+
+.rk-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rk-admin-table th {
+  padding: 6px 4px;
+  text-align: left;
+  color: var(--rk-text-strong);
+}
+
+.rk-admin-table td {
+  padding: 6px 4px;
+  border-top: 1px solid var(--rk-border);
+  color: var(--rk-text);
+}
+
+.rk-admin-textarea {
+  height: 80px;
+  padding: 8px 12px;
+  resize: vertical;
+}
+
+.rk-admin-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-top: 1px solid var(--rk-border);
+  font-size: 13px;
+  color: var(--rk-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rk-admin-note-date,
+.rk-admin-empty {
+  font-size: 12px;
+  color: var(--rk-muted);
+}
+
 .rk-image-option {
   display: flex;
   flex-wrap: wrap;

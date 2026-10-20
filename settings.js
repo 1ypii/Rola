@@ -651,8 +651,187 @@
     for (const [id, node] of panel.navItems) node.setAttribute('aria-current', !query.trim() && id === activeCategory ? 'true' : 'false');
   };
 
+  let adminNode = null;
+
+  const sha256 = async text => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+
+  const adminUnlocked = () => {
+    try {
+      return sessionStorage.getItem('rk-admin') === '1';
+    } catch {
+      return false;
+    }
+  };
+
+  const adminCard = (title, ...content) => el('section', { class: 'rk-admin-card' },
+    el('div', { class: 'rk-admin-card-head' }, title),
+    el('div', { class: 'rk-admin-card-body' }, content)
+  );
+
+  const adminRow = (label, value) => el('div', { class: 'rk-admin-row' }, el('span', { class: 'rk-admin-label' }, label), el('span', { class: 'rk-admin-value' }, value));
+
+  const adminTable = (heads, rows) => rows.length
+    ? el('table', { class: 'rk-admin-table' },
+      el('thead', null, el('tr', null, heads.map(head => el('th', null, head)))),
+      el('tbody', null, rows.map(cells => el('tr', null, cells.map(cell => el('td', null, cell)))))
+    )
+    : el('div', { class: 'rk-admin-empty' }, 'None');
+
+  const adminDate = value => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString();
+  };
+
+  const adminNotes = id => {
+    const all = Rk.store.get('admin.notes', {});
+    return all && typeof all === 'object' && Array.isArray(all[id]) ? all[id] : [];
+  };
+
+  const adminProfile = async id => {
+    const safe = promise => Promise.resolve(promise).catch(() => null);
+    const [user, groups, games, presence, history, friends, followers, following] = await Promise.all([
+      safe(Rk.api.get(`https://users.roblox.com/v1/users/${id}`)),
+      safe(Rk.api.get(`https://groups.roblox.com/v2/users/${id}/groups/roles`)),
+      safe(Rk.api.get(`https://games.roblox.com/v2/users/${id}/games?accessFilter=Public&limit=50&sortOrder=Desc`)),
+      safe(Rk.api.post('https://presence.roblox.com/v1/presence/users', { userIds: [id] })),
+      safe(Rk.api.get(`https://users.roblox.com/v1/users/${id}/username-history?limit=50&sortOrder=Desc`)),
+      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/friends/count`)),
+      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followers/count`)),
+      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followings/count`))
+    ]);
+    if (!user || !Rk.isId(user.id)) return el('div', { class: 'rk-admin-empty' }, 'No user found');
+    const entry = presence && Array.isArray(presence.userPresences) ? presence.userPresences[0] : null;
+    const type = entry ? Number(entry.userPresenceType) || 0 : 0;
+    const where = entry && typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : '';
+    const location = ['Offline', 'Online', where ? `Playing ${where}` : 'In game', where ? `Studio: ${where}` : 'In Studio'][type] || 'Offline';
+    const count = json => (json && Number.isSafeInteger(json.count) ? json.count.toLocaleString() : '?');
+    const groupRows = (groups && Array.isArray(groups.data) ? groups.data : []).filter(item => item && item.group).map(item => [
+      el('a', { href: `/communities/${item.group.id}`, target: '_blank' }, String(item.group.name)),
+      String(item.role && item.role.name ? item.role.name : ''),
+      Number(item.group.memberCount || 0).toLocaleString()
+    ]);
+    const gameRows = (games && Array.isArray(games.data) ? games.data : []).filter(game => game && game.rootPlace).map(game => [
+      el('a', { href: `/games/${game.rootPlace.id}`, target: '_blank' }, String(game.name)),
+      Number(game.placeVisits || 0).toLocaleString(),
+      adminDate(game.updated)
+    ]);
+    const names = (history && Array.isArray(history.data) ? history.data : []).map(item => item && item.name).filter(name => typeof name === 'string');
+    const noteList = el('div', { class: 'rk-admin-notes' });
+    const renderNotes = () => noteList.replaceChildren(...adminNotes(user.id).map(note => el('div', { class: 'rk-admin-note' }, el('span', { class: 'rk-admin-note-date' }, adminDate(note.at)), String(note.text))));
+    const noteField = el('textarea', { class: 'rk-input rk-admin-textarea', placeholder: 'Enter new note...', maxlength: '1000' });
+    const addNote = () => {
+      const text = noteField.value.trim();
+      if (!text) return;
+      const all = Rk.store.get('admin.notes', {});
+      const next = all && typeof all === 'object' && !Array.isArray(all) ? { ...all } : {};
+      next[user.id] = [{ text, at: Date.now() }, ...adminNotes(user.id)].slice(0, 50);
+      Rk.store.set('admin.notes', next);
+      noteField.value = '';
+      renderNotes();
+    };
+    renderNotes();
+    return el('div', { class: 'rk-admin-grid' },
+      el('div', { class: 'rk-admin-column' },
+        adminCard('Account Summary',
+          adminRow('Display Name', el('span', { class: 'rk-inline' }, String(user.displayName), user.hasVerifiedBadge ? el('span', { class: 'rk-admin-tag' }, 'Verified') : null)),
+          adminRow('Moderation Status', el('span', { class: user.isBanned ? 'rk-admin-bad' : 'rk-admin-good' }, user.isBanned ? 'Terminated' : 'OK')),
+          adminRow('User ID', String(user.id)),
+          adminRow('User Name', String(user.name)),
+          adminRow('Joined', adminDate(user.created)),
+          adminRow('Current Location', location),
+          adminRow('Connections', `${count(friends)} friends, ${count(followers)} followers, ${count(following)} following`),
+          user.description ? el('p', { class: 'rk-admin-bio' }, String(user.description)) : null,
+          el('div', { class: 'rk-admin-person' },
+            ui.thumb(Rk.thumb('Avatar', user.id, '420x420'), { size: 120 }),
+            el('div', { class: 'rk-admin-links' },
+              el('a', { href: `/users/${user.id}/profile`, target: '_blank' }, 'User homepage'),
+              el('a', { href: `/users/${user.id}/inventory`, target: '_blank' }, 'Inventory'),
+              el('a', { href: `/users/${user.id}/friends`, target: '_blank' }, 'Friends')
+            )
+          )
+        ),
+        adminCard(`Created Games (${gameRows.length})`, adminTable(['Game', 'Visits', 'Updated'], gameRows))
+      ),
+      el('div', { class: 'rk-admin-column' },
+        adminCard(`Groups (${groupRows.length})`, adminTable(['Group', 'Role', 'Members'], groupRows)),
+        adminCard('User Notes', noteField, ui.button('Add Note', { variant: 'primary', onClick: addNote }), noteList),
+        adminCard(`Past Usernames (${names.length})`, names.length ? el('div', { class: 'rk-inline' }, names.map(name => el('span', { class: 'rk-admin-tag' }, name))) : el('div', { class: 'rk-admin-empty' }, 'None'))
+      )
+    );
+  };
+
+  const adminView = () => {
+    if (adminNode) return adminNode;
+    adminNode = el('div', { class: 'rk-admin' });
+    const showPanel = () => {
+      const results = el('div', { class: 'rk-admin-results' });
+      const field = ui.input({ placeholder: 'Username or user id', maxLength: 40, onEnter: () => lookup() });
+      const lookup = async () => {
+        const text = field.value.trim();
+        if (!text) return;
+        results.replaceChildren(ui.spinner(20));
+        let id = /^\d{1,15}$/.test(text) ? Number(text) : null;
+        if (!id) {
+          const json = await Rk.api.post('https://users.roblox.com/v1/usernames/users', { usernames: [text], excludeBannedUsers: false }).catch(() => null);
+          const hit = json && Array.isArray(json.data) ? json.data[0] : null;
+          id = hit ? Number(hit.id) : null;
+        }
+        results.replaceChildren(Rk.isId(id) ? await adminProfile(id) : el('div', { class: 'rk-admin-empty' }, 'No user found'));
+      };
+      adminNode.replaceChildren(
+        el('div', { class: 'rk-admin-search' }, field, ui.button('Search', { variant: 'primary', onClick: lookup })),
+        results
+      );
+    };
+    const showLogin = () => {
+      const saved = Rk.store.get('admin.login', null);
+      const creating = !saved || typeof saved.salt !== 'string' || typeof saved.hash !== 'string';
+      const user = ui.input({ placeholder: 'Username', maxLength: 40 });
+      const pass = ui.input({ type: 'password', placeholder: 'Password', maxLength: 80 });
+      const submit = async () => {
+        const name = user.value.trim();
+        if (creating) {
+          if (!name || pass.value.length < 4) {
+            ui.toast('Pick a username and a password of at least 4 characters', { tone: 'warning' });
+            return;
+          }
+          const salt = [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+          Rk.store.set('admin.login', { salt, hash: await sha256(`${salt}:${name}:${pass.value}`) });
+        } else if (await sha256(`${saved.salt}:${name}:${pass.value}`) !== saved.hash) {
+          ui.toast('Wrong username or password', { tone: 'danger' });
+          pass.value = '';
+          return;
+        }
+        try {
+          sessionStorage.setItem('rk-admin', '1');
+        } catch {}
+        showPanel();
+      };
+      pass.addEventListener('keydown', event => {
+        if (event.key === 'Enter') submit();
+      });
+      adminNode.replaceChildren(adminCard(creating ? 'Create your admin login' : 'Sign in',
+        creating ? el('div', { class: 'rk-admin-empty' }, 'Choose the username and password for this panel. They stay on this browser only.') : null,
+        user,
+        pass,
+        ui.button(creating ? 'Create login' : 'Sign in', { variant: 'primary', onClick: submit })
+      ));
+    };
+    if (adminUnlocked()) showPanel();
+    else showLogin();
+    return adminNode;
+  };
+
   const renderList = ({ keepScroll = false } = {}) => {
     if (!panel) return;
+    if (activeCategory === 'admin' && !query.trim()) {
+      panel.title.textContent = 'Admin';
+      panel.subtitle.textContent = 'Look up any account';
+      panel.bulk.classList.add('rk-hidden');
+      if (panel.list.firstElementChild !== adminView()) panel.list.replaceChildren(adminView());
+      renderNav();
+      return;
+    }
     const scroll = panel.list.scrollTop;
     const text = query.trim().toLowerCase();
     const category = Rk.categories.find(item => item.id === activeCategory);
@@ -740,6 +919,14 @@
       navItems.set(category.id, item);
       return item;
     }));
+    const adminItem = el('button', { type: 'button', class: 'rk-settings-nav-item', onclick: () => {
+      activeCategory = 'admin';
+      query = '';
+      search.value = '';
+      renderList();
+    } }, el('span', null, 'Admin'), icon('lock', 14));
+    navItems.set('admin', adminItem);
+    nav.append(adminItem);
     const total = el('div');
     const themePicker = ui.select(themeChoices(), theme, setTheme);
     const themeEdit = ui.button(activeTheme() ? 'Edit theme' : 'New theme', { variant: 'ghost', onClick: editTheme });

@@ -590,6 +590,81 @@ const regionList = async () => {
   return list;
 };
 
+const REGION_RULE_ID = 7301;
+let regionRuleReady = null;
+
+const ensureRegionRule = () => {
+  if (!regionRuleReady) {
+    regionRuleReady = chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [REGION_RULE_ID],
+      addRules: [{
+        id: REGION_RULE_ID,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders',
+          requestHeaders: [
+            { header: 'user-agent', operation: 'set', value: 'Roblox/WinInet' },
+            { header: 'origin', operation: 'set', value: 'https://www.roblox.com' },
+            { header: 'referer', operation: 'set', value: 'https://www.roblox.com/' }
+          ]
+        },
+        condition: { urlFilter: '||gamejoin.roblox.com/v1/join-game-instance', resourceTypes: ['xmlhttprequest', 'other'], tabIds: [chrome.tabs.TAB_ID_NONE] }
+      }]
+    }).catch(err => {
+      regionRuleReady = null;
+      throw err;
+    });
+  }
+  return regionRuleReady;
+};
+
+let regionMap = null;
+
+const regionFor = async ip => {
+  const prefix = ip.split('.').slice(0, 3).join('.');
+  if (!regionMap) {
+    const list = await regionList();
+    const map = new Map();
+    list.groups.forEach((prefixes, index) => {
+      for (const item of String(prefixes).split(' ')) map.set(item, list.labels[index]);
+    });
+    regionMap = map;
+  }
+  if (regionMap.has(prefix)) return regionMap.get(prefix);
+  const saved = (await chrome.storage.local.get('rkbg:geo'))['rkbg:geo'] || {};
+  if (typeof saved[prefix] === 'string') return saved[prefix];
+  const geo = await fetch(`https://get.geojs.io/v1/ip/geo/${ip}.json`, { credentials: 'omit' }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+  const code = geo && /^[A-Z]{2}$/.test(geo.country_code) ? geo.country_code : '';
+  if (!code) return null;
+  const city = typeof geo.city === 'string' && geo.city ? geo.city : typeof geo.region === 'string' ? geo.region : '';
+  const label = city ? `${city.slice(0, 40)}, ${code}` : code;
+  const entries = Object.entries(saved).slice(-499);
+  await chrome.storage.local.set({ 'rkbg:geo': { ...Object.fromEntries(entries), [prefix]: label } });
+  return label;
+};
+
+const serverRegion = async ({ placeId, jobId } = {}) => {
+  if (!Number.isSafeInteger(placeId) || placeId <= 0 || typeof jobId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) throw new Error('bad server');
+  await ensureRegionRule();
+  let json;
+  try {
+    json = await robloxRequest('https://gamejoin.roblox.com/v1/join-game-instance', { method: 'POST', body: { placeId, isTeleport: false, gameId: jobId, gameJoinAttemptId: crypto.randomUUID() } });
+  } catch (err) {
+    const status = Number((/(\d{3})/.exec(String(err && err.message)) || [])[1]) || 0;
+    if (status === 429) return { retry: true };
+    return { reason: 'Region unavailable', detail: `Roblox refused the lookup${status ? ` (${status})` : ''}`, stop: status === 401 || status === 403 };
+  }
+  const script = json && json.joinScript;
+  const endpoint = script && Array.isArray(script.UdmuxEndpoints) && script.UdmuxEndpoints[0] ? script.UdmuxEndpoints[0].Address : null;
+  const address = typeof endpoint === 'string' ? endpoint : script && typeof script.MachineAddress === 'string' ? script.MachineAddress : null;
+  if (!address || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(address)) {
+    const message = json && typeof json.message === 'string' && json.message ? json.message : '';
+    return { reason: 'Region unknown', detail: `Roblox did not give this server's address${message ? `: ${message}` : ''}` };
+  }
+  const label = await regionFor(address).catch(() => null);
+  return label ? { label } : { reason: 'Unknown region', detail: `No location found for ${address.split('.').slice(0, 3).join('.')}.x` };
+};
+
 const handlers = {
   values: () => loadValues(),
   notify: payload => {
@@ -600,6 +675,7 @@ const handlers = {
   download: payload => download(payload || {}),
   'image-data': payload => imageData(payload || {}),
   regions: () => regionList(),
+  'server-region': payload => serverRegion(payload || {}),
   sound: payload => playSound(payload).then(() => true),
   music: () => syncMusic(),
   unfriends: async () => {

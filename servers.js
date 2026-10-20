@@ -1174,44 +1174,7 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
     css: reveal('inline-flex', 'ping')
   });
 
-  const REGIONS_KEY = 'rk-servers-regions';
   const FLAGS_KEY = 'rk-servers-flags';
-  const REGIONS_TTL = 86400000;
-
-  let regionsRequest = null;
-  const loadRegions = () => {
-    if (regionsRequest) return regionsRequest;
-    regionsRequest = (async () => {
-      try {
-        const cached = JSON.parse(localStorage.getItem(REGIONS_KEY) || 'null');
-        if (cached && Date.now() - cached.time < REGIONS_TTL && Array.isArray(cached.labels) && Array.isArray(cached.groups)) {
-          const map = new Map();
-          cached.groups.forEach((prefixes, index) => {
-            if (typeof cached.labels[index] !== 'string' || typeof prefixes !== 'string') return;
-            for (const prefix of prefixes.split(' ')) map.set(prefix, cached.labels[index]);
-          });
-          if (map.size) return map;
-        }
-      } catch {}
-      const list = await Rk.bg('regions');
-      const labels = list && Array.isArray(list.labels) ? list.labels : [];
-      const groups = list && Array.isArray(list.groups) ? list.groups : [];
-      const map = new Map();
-      groups.forEach((prefixes, index) => {
-        if (typeof labels[index] !== 'string' || typeof prefixes !== 'string') return;
-        for (const prefix of prefixes.split(' ')) map.set(prefix, labels[index]);
-      });
-      if (!map.size) throw new Error('empty region list');
-      try {
-        localStorage.setItem(REGIONS_KEY, JSON.stringify({ time: Date.now(), labels, groups }));
-      } catch {}
-      return map;
-    })();
-    regionsRequest.catch(() => {
-      regionsRequest = null;
-    });
-    return regionsRequest;
-  };
 
   const flagRequests = new Map();
   const flagFor = code => {
@@ -1303,29 +1266,14 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
       };
 
       const locate = async jobId => {
-        let json = null;
-        try {
-          json = await Rk.api.post('https://gamejoin.roblox.com/v1/join-game-instance', { placeId: Number(placeId), isTeleport: false, gameId: jobId, gameJoinAttemptId: crypto.randomUUID() });
-        } catch (err) {
-          if (err && err.status === 429) {
-            pausedUntil = Date.now() + 30000;
-            return undefined;
-          }
-          if (err && (err.status === 401 || err.status === 403)) stopped = true;
-          return { reason: 'Region unavailable', detail: `Roblox refused the lookup${err && err.status ? ` (${err.status})` : ''}` };
+        const result = await Rk.bg('server-region', { placeId: Number(placeId), jobId }).catch(() => null);
+        if (!result) return { reason: 'Region unknown', detail: 'Rola could not run the region lookup' };
+        if (result.retry) {
+          pausedUntil = Date.now() + 30000;
+          return undefined;
         }
-        const script = json && json.joinScript;
-        const endpoint = script && Array.isArray(script.UdmuxEndpoints) && script.UdmuxEndpoints[0] ? script.UdmuxEndpoints[0].Address : null;
-        const address = typeof endpoint === 'string' ? endpoint : script && typeof script.MachineAddress === 'string' ? script.MachineAddress : null;
-        const match = address ? /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/.exec(address) : null;
-        if (!match) {
-          const message = json && typeof json.message === 'string' && json.message ? json.message : '';
-          return { reason: 'Region unknown', detail: `Roblox did not give this server's address${message ? `: ${message}` : ''}` };
-        }
-        const regions = await loadRegions().catch(() => null);
-        if (!regions) return { reason: 'Region unknown', detail: 'Could not load the region list' };
-        const label = regions.get(match[1]);
-        return label ? { label } : { reason: 'Unknown region', detail: `Datacenter ${match[1]}.x is not in the public region list yet` };
+        if (result.stop) stopped = true;
+        return result;
       };
 
       const pump = () => {

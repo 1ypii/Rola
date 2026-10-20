@@ -26,7 +26,8 @@
     "notifications",
     "downloads",
     "offscreen",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://*.roblox.com/*",
