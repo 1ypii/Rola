@@ -1189,6 +1189,140 @@
     }
   });
 
+  Rk.feature({
+    id: 'avatar.liveResellers',
+    category: 'avatar',
+    name: 'Live resellers',
+    description: 'Shows the cheapest resale listings on limited items, updating live, with how long ago each one was listed.',
+    default: false,
+    pages: ['item'],
+    css: `
+      .rk-resellers { display: flex; flex-direction: column; }
+      .rk-reseller { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-top: 1px solid var(--rk-border); border-radius: var(--rk-radius); transition: background-color 1.5s ease; animation: rk-rise var(--rk-med) var(--rk-ease) both; }
+      .rk-reseller:first-child { border-top: 0; }
+      .rk-reseller-new { background: var(--rk-accent-soft); }
+      .rk-reseller-name { flex: 1; min-width: 0; overflow: hidden; font-weight: 600; color: var(--rk-text-strong) !important; text-decoration: none !important; white-space: nowrap; text-overflow: ellipsis; }
+      .rk-reseller-serial { font-size: 12px; color: var(--rk-muted); }
+      .rk-reseller-age { min-width: 96px; font-size: 12px; color: var(--rk-muted); text-align: right; font-variant-numeric: tabular-nums; }
+      .rk-resellers-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--rk-success); }
+      .rk-resellers-live::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: rk-resellers-pulse 1.6s ease-in-out infinite; }
+      @keyframes rk-resellers-pulse { 50% { opacity: 0.3; } }
+      @media (prefers-reduced-motion: reduce) { .rk-reseller, .rk-resellers-live::before { animation: none; } }
+    `,
+    async run(ctx) {
+      const { kind, id } = Rk.page();
+      if (!isCatalogKind(kind) || !Rk.isId(id)) return;
+      const holder = slot(itemArea());
+      const meta = await itemMeta(kind, id);
+      const itemId = meta && typeof meta.collectibleItemId === 'string' && /^[0-9a-f-]{36}$/i.test(meta.collectibleItemId) ? meta.collectibleItemId : null;
+      if (!itemId) {
+        holder.remove();
+        return;
+      }
+      const seenKey = 'avatar.resellersSeen';
+      const readSeen = () => {
+        const saved = Rk.store.get(seenKey, {});
+        return isObject(saved) && !Array.isArray(saved) ? saved : {};
+      };
+      const visitKey = `item:${itemId}`;
+      const lastVisit = Number(readSeen()[visitKey]) || 0;
+      const list = el('div', { class: 'rk-resellers' }, ui.spinner(18));
+      const section = ui.section('Live resellers', list, { className: 'rk-avatar-resellers', actions: el('span', { class: 'rk-resellers-live' }, 'Live') });
+      holder.replaceWith(section);
+      const rows = new Map();
+      let firstPoll = true;
+      let pollTimer = 0;
+      let tickTimer = 0;
+      const ageText = stamp => {
+        if (stamp === 'earlier') return 'Listed earlier';
+        if (stamp === 'away') return 'New since last visit';
+        const seconds = Math.max(0, Math.floor((Date.now() - stamp) / 1000));
+        if (seconds < 60) return `Listed ${seconds}s ago`;
+        if (seconds < 3600) return `Listed ${Math.floor(seconds / 60)}m ago`;
+        if (seconds < 86400) return `Listed ${Math.floor(seconds / 3600)}h ago`;
+        return `Listed ${Math.floor(seconds / 86400)}d ago`;
+      };
+      const tick = () => {
+        for (const entry of rows.values()) entry.age.textContent = ageText(entry.stamp);
+      };
+      const rowFor = (listing, stamp, fresh) => {
+        const seller = isObject(listing.seller) ? listing.seller : {};
+        const sellerId = Number(seller.sellerId);
+        const group = seller.sellerType === 'Group';
+        const name = str(seller.name, 60) || 'Seller';
+        const age = el('span', { class: 'rk-reseller-age' }, ageText(stamp));
+        const row = el('div', { class: `rk-reseller${fresh ? ' rk-reseller-new' : ''}` },
+          ui.thumb(Rk.thumb(group ? 'GroupIcon' : 'AvatarHeadShot', sellerId, '150x150'), { size: 32, round: !group }),
+          el('a', { class: 'rk-reseller-name', href: group ? `/communities/${sellerId}` : `/users/${sellerId}/profile`, title: name }, name),
+          Number.isSafeInteger(listing.serialNumber) ? el('span', { class: 'rk-reseller-serial' }, `#${fmt.num(listing.serialNumber)}`) : null,
+          ui.robux(Number(listing.price)),
+          age
+        );
+        if (fresh) setTimeout(() => row.classList.remove('rk-reseller-new'), 4000);
+        return { row, age, stamp };
+      };
+      const poll = async () => {
+        clearTimeout(pollTimer);
+        if (!Rk.isEnabled(ctx.id)) return;
+        const json = await Rk.api.get(`https://apis.roblox.com/marketplace-sales/v1/item/${itemId}/resellers?limit=10`).catch(() => null);
+        const listings = json && Array.isArray(json.data)
+          ? json.data.filter(listing => isObject(listing) && typeof listing.collectibleProductId === 'string' && Number(listing.price) > 0).slice(0, 10)
+          : null;
+        if (listings) {
+          const seen = readSeen();
+          const now = Date.now();
+          let changed = !seen[visitKey];
+          for (const listing of listings) {
+            if (seen[listing.collectibleProductId]) continue;
+            seen[listing.collectibleProductId] = firstPoll ? (lastVisit ? 'away' : 'earlier') : now;
+            changed = true;
+          }
+          seen[visitKey] = now;
+          if (changed || firstPoll) {
+            const keys = Object.keys(seen);
+            Rk.store.set(seenKey, keys.length > 3000 ? Object.fromEntries(keys.slice(-3000).map(key => [key, seen[key]])) : seen);
+          }
+          const current = new Set(listings.map(listing => listing.collectibleProductId));
+          for (const [productId, entry] of rows) {
+            if (current.has(productId)) continue;
+            entry.row.remove();
+            rows.delete(productId);
+          }
+          if (!rows.size) list.replaceChildren();
+          for (const listing of listings) {
+            let entry = rows.get(listing.collectibleProductId);
+            if (!entry) {
+              entry = rowFor(listing, seen[listing.collectibleProductId], !firstPoll);
+              rows.set(listing.collectibleProductId, entry);
+            }
+            list.append(entry.row);
+          }
+          if (!listings.length) list.replaceChildren(el('div', { class: 'rk-muted' }, 'Nobody is reselling this right now'));
+          firstPoll = false;
+        }
+        if (document.visibilityState === 'visible') pollTimer = setTimeout(poll, 15000);
+      };
+      const startTicking = () => {
+        clearInterval(tickTimer);
+        tickTimer = document.visibilityState === 'visible' && Rk.isEnabled(ctx.id) ? setInterval(tick, 1000) : 0;
+      };
+      document.addEventListener('visibilitychange', () => {
+        startTicking();
+        if (document.visibilityState === 'visible') poll();
+        else clearTimeout(pollTimer);
+      });
+      Rk.onSettings(() => {
+        const on = Rk.isEnabled(ctx.id);
+        section.classList.toggle('rk-hidden', !on);
+        startTicking();
+        if (on) poll();
+        else clearTimeout(pollTimer);
+      });
+      startTicking();
+      poll();
+    }
+  });
+
   const experienceLink = async () => {
     await Rk.domReady;
     const anchor = [...document.querySelectorAll('#item-container a[href*="/games/"]')].find(node => !node.closest(OURS) && Rk.idFrom(node.getAttribute('href'), 'game'));
