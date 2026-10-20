@@ -89,16 +89,16 @@ const audibleRange = buffer => {
   return { offset, duration: Math.min(buffer.duration - offset, (last - first) / buffer.sampleRate + 0.05) };
 };
 
-const clip = async src => {
+const decodeBase64 = data => Uint8Array.from(atob(data), char => char.charCodeAt(0)).buffer;
+
+const clip = async (key, data) => {
   try {
     const context = await audioContext();
-    let entry = clips.get(src);
+    let entry = clips.get(key);
     if (!entry) {
-      const response = await fetch(src);
-      if (!response.ok) throw new Error(`audio request failed ${response.status}`);
-      const buffer = await context.decodeAudioData(await response.arrayBuffer());
+      const buffer = await context.decodeAudioData(decodeBase64(data));
       entry = { buffer, ...audibleRange(buffer) };
-      clips.set(src, entry);
+      clips.set(key, entry);
       if (clips.size > 10) clips.delete(clips.keys().next().value);
     }
     const source = context.createBufferSource();
@@ -170,9 +170,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   if (message.type !== 'rk-play') return false;
+  const hasData = typeof message.data === 'string' && message.data;
+  if (typeof message.key === 'string' && !hasData && !clips.has(message.key)) {
+    sendResponse({ played: false });
+    return false;
+  }
   clearTimeout(idleTimer);
   playing += 1;
-  if (typeof message.src === 'string' && message.src.startsWith('https://')) clip(message.src);
+  if (typeof message.key === 'string') clip(message.key, message.data);
   else chime();
+  sendResponse({ played: true });
   return false;
 });

@@ -105,14 +105,64 @@ const openOffscreen = async () => {
   } catch {}
 };
 
+const soundKey = assetId => `rkbg:sound:${assetId}`;
+
+const encodeBytes = buffer => {
+  const bytes = new Uint8Array(buffer);
+  let text = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+};
+
+const soundMemory = new Map();
+
+const soundBytes = async assetId => {
+  if (soundMemory.has(assetId)) return soundMemory.get(assetId);
+  const key = soundKey(assetId);
+  const saved = (await chrome.storage.local.get(key))[key];
+  if (typeof saved === 'string' && saved) {
+    soundMemory.set(assetId, saved);
+    return saved;
+  }
+  const response = await fetch(await audioUrl(assetId));
+  if (!response.ok) throw new Error(`audio request failed ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  if (buffer.byteLength > 1500000) throw new Error('audio too large to keep');
+  const data = encodeBytes(buffer);
+  soundMemory.set(assetId, data);
+  if (soundMemory.size > 4) soundMemory.delete(soundMemory.keys().next().value);
+  await chrome.storage.local.set({ [key]: data });
+  return data;
+};
+
+const purchaseSoundAsset = settings => {
+  const options = settings && settings.options && settings.options['tools.purchaseFailSound'];
+  const value = options && typeof options.assetId === 'string' ? options.assetId.trim() : '';
+  return isOn(settings, 'tools.purchaseFailSound') && /^\d{1,20}$/.test(value) ? value : null;
+};
+
+const preloadSounds = async () => {
+  const settings = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
+  const wanted = [settings && settings.enabled && settings.enabled['tools.alertSound'] === false ? null : soundAsset(settings), purchaseSoundAsset(settings)].filter(Boolean);
+  const kept = (await chrome.storage.local.get('rkbg:sounds'))['rkbg:sounds'];
+  const stale = (Array.isArray(kept) ? kept : []).filter(id => typeof id === 'string' && !wanted.includes(id)).map(soundKey);
+  if (stale.length) await chrome.storage.local.remove(stale);
+  await chrome.storage.local.set({ 'rkbg:sounds': wanted });
+  await Promise.allSettled(wanted.map(soundBytes));
+};
+
 const playSound = async override => {
   const settings = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
   const custom = override && typeof override === 'object' && typeof override.assetId === 'string' && /^\d{1,20}$/.test(override.assetId.trim()) ? override.assetId.trim() : null;
   if (!custom && settings && settings.enabled && settings.enabled['tools.alertSound'] === false) return;
   const assetId = custom || soundAsset(settings);
-  const src = assetId ? await audioUrl(assetId).catch(() => null) : null;
   await openOffscreen();
-  await chrome.runtime.sendMessage({ type: 'rk-play', src }).catch(() => {});
+  if (assetId) {
+    const ready = await chrome.runtime.sendMessage({ type: 'rk-play', key: assetId }).catch(() => null);
+    if (ready && ready.played) return;
+  }
+  const data = assetId ? await soundBytes(assetId).catch(() => null) : null;
+  await chrome.runtime.sendMessage({ type: 'rk-play', key: data ? assetId : null, data }).catch(() => {});
 };
 
 const syncMusic = async () => {
@@ -515,6 +565,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes[SETTINGS_KEY]) return;
   syncAlarm();
   syncMusic().catch(() => {});
+  preloadSounds().catch(() => {});
 });
 
 chrome.tabs.onRemoved.addListener(() => {
@@ -525,5 +576,11 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.url || change.status === 'complete') syncMusic().catch(() => {});
 });
 
-chrome.runtime.onInstalled.addListener(() => syncAlarm());
-chrome.runtime.onStartup.addListener(() => syncAlarm());
+chrome.runtime.onInstalled.addListener(() => {
+  syncAlarm();
+  preloadSounds().catch(() => {});
+});
+chrome.runtime.onStartup.addListener(() => {
+  syncAlarm();
+  preloadSounds().catch(() => {});
+});
