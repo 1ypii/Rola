@@ -1839,29 +1839,161 @@
     }
   });
 
+  const pinnedOutfitIds = () => {
+    const saved = Rk.store.get('avatar.pinnedOutfits', []);
+    return Array.isArray(saved) ? saved.filter(id => Rk.isId(id)).slice(0, 50) : [];
+  };
+
+  const togglePinnedOutfit = id => {
+    const pins = pinnedOutfitIds();
+    Rk.store.set('avatar.pinnedOutfits', pins.includes(id) ? pins.filter(pin => pin !== id) : [...pins, id].slice(0, 50));
+  };
+
+  const pinnedFirst = outfits => {
+    const pins = pinnedOutfitIds();
+    return [
+      ...pins.map(id => outfits.find(outfit => outfit.id === id)).filter(Boolean),
+      ...outfits.filter(outfit => !pins.includes(outfit.id))
+    ];
+  };
+
+  const userOutfits = async () => {
+    const user = await Rk.me();
+    if (!user) return [];
+    const json = await fetchJson(`https://avatar.roblox.com/v1/users/${user.id}/outfits?page=1&itemsPerPage=50&isEditable=true`);
+    return (json && Array.isArray(json.data) ? json.data : []).filter(outfit => outfit && Rk.isId(outfit.id)).slice(0, 50);
+  };
+
+  const wearOutfit = async outfit => {
+    const details = await Rk.api.get(`https://avatar.roblox.com/v1/outfits/${outfit.id}/details`);
+    const assets = isObject(details) && Array.isArray(details.assets) ? details.assets.filter(asset => isObject(asset) && Rk.isId(asset.id)) : null;
+    if (!assets) throw new Error('unexpected outfit data');
+    const result = await Rk.api.post('https://avatar.roblox.com/v2/avatar/set-wearing-assets', { assets: assets.map(asset => (isObject(asset.meta) ? { id: Number(asset.id), meta: asset.meta } : { id: Number(asset.id) })) });
+    if (isObject(result) && result.success === false) throw new Error('wear rejected');
+    await Promise.allSettled([
+      isObject(details.bodyColors) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-body-colors', details.bodyColors) : null,
+      typeof details.playerAvatarType === 'string' ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: details.playerAvatarType }) : null,
+      isObject(details.scale) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-scales', details.scale) : null
+    ]);
+  };
+
+  const pinCss = `
+    .rk-avatar-pin { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--rk-radius); background: transparent; color: var(--rk-muted); opacity: 0.45; cursor: pointer; transition: opacity var(--rk-fast) ease, background-color var(--rk-fast) ease, color var(--rk-fast) ease; }
+    .rk-avatar-pin:hover { opacity: 1; background: var(--rk-hover); }
+    .rk-avatar-pin[aria-pressed="true"] { color: var(--rk-accent); opacity: 1; }
+  `;
+
+  const pinButton = (outfit, name, onChange) => {
+    const pinned = pinnedOutfitIds().includes(outfit.id);
+    const pin = el('button', { type: 'button', class: 'rk-avatar-pin', 'aria-pressed': pinned ? 'true' : 'false', 'aria-label': pinned ? `Unpin ${name}` : `Pin ${name}`, title: pinned ? 'Unpin' : 'Pin to top' }, icon('pin', 16));
+    pin.addEventListener('click', event => {
+      event.stopPropagation();
+      togglePinnedOutfit(outfit.id);
+      onChange();
+    });
+    return pin;
+  };
+
   Rk.feature({
     id: 'avatar.outfits',
     category: 'avatar',
     name: 'Saved outfits',
-    description: 'Shows your saved outfits with previews in the avatar editor.',
+    description: 'Replaces the Creations list in the Avatars tab with bigger outfit previews you can pin to the top. Click one to wear it.',
     default: false,
     pages: ['avatar'],
-    css: tileCss,
-    async run() {
-      const holder = slot(avatarArea());
-      const user = await Rk.me();
-      if (!user) return;
-      const json = await fetchJson(`https://avatar.roblox.com/v1/users/${user.id}/outfits?page=1&itemsPerPage=50&isEditable=true`);
-      const outfits = (json && Array.isArray(json.data) ? json.data : []).filter(outfit => outfit && Rk.isId(outfit.id)).slice(0, 50);
-      if (!outfits.length) return;
-      const tiles = outfits.map(outfit => {
-        const name = str(outfit.name, 100) || 'Outfit';
-        return tile(null, Rk.thumb('Outfit', outfit.id, '150x150'), name);
+    css: `${tileCss}${pinCss}
+      #costumes.rk-outfits-on #avatar-items-container { display: none !important; }
+      #costumes:not(.rk-outfits-on) > .rk-avatar-outfits-grid { display: none; }
+      .rk-avatar-outfits-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 8px 0; }
+      .rk-avatar-outfit { position: relative; cursor: pointer; }
+      .rk-avatar-outfit:hover { background: var(--rk-hover); }
+      .rk-avatar-outfit:focus-visible { outline: 2px solid var(--rk-accent); outline-offset: 2px; }
+      .rk-avatar-outfit .rk-avatar-pin { position: absolute; top: 8px; right: 8px; background: var(--rk-bg); }
+      .rk-avatar-outfit-pinned { background: var(--rk-accent-soft); }
+      .rk-avatar-outfit.rk-busy { opacity: 0.5; pointer-events: none; }
+    `,
+    run(ctx) {
+      let outfits = [];
+      let pane = null;
+      let grid = null;
+      let nativeCount = -1;
+      let reloadTimer = 0;
+      const nativeItems = () => [...pane.querySelectorAll('#avatar-items-container li')];
+      const nativeMatch = (outfit, index) => {
+        const name = str(outfit.name, 100);
+        const items = nativeItems();
+        const byName = items.filter(item => item.textContent.includes(name));
+        return byName.length === 1 ? byName[0] : items[index] || null;
+      };
+      const choose = async (outfit, card) => {
+        const name = str(outfit.name, 100) || 'outfit';
+        const native = nativeMatch(outfit, outfits.indexOf(outfit));
+        const target = native && (native.querySelector('.item-card-thumb-container, .item-card-link, a, button') || native);
+        if (target) {
+          target.click();
+          return;
+        }
+        card.classList.add('rk-busy');
+        try {
+          await wearOutfit(outfit);
+          ui.toast(`Wearing ${name}, reload the editor to see it`, { tone: 'success' });
+        } catch {
+          ui.toast('Could not wear that outfit', { tone: 'danger' });
+        }
+        card.classList.remove('rk-busy');
+      };
+      const render = () => {
+        if (!grid) return;
+        grid.replaceChildren(...pinnedFirst(outfits).map(outfit => {
+          const name = str(outfit.name, 100) || 'Outfit';
+          const pinned = pinnedOutfitIds().includes(outfit.id);
+          const card = el('div', { class: `rk-avatar-tile rk-avatar-outfit${pinned ? ' rk-avatar-outfit-pinned' : ''}`, role: 'button', tabindex: '0', title: name },
+            ui.thumb(Rk.thumb('Outfit', outfit.id, '150x150'), { size: 120, alt: name }),
+            el('span', { class: 'rk-avatar-tile-name' }, name),
+            pinButton(outfit, name, render)
+          );
+          card.addEventListener('click', () => choose(outfit, card));
+          card.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              choose(outfit, card);
+            }
+          });
+          return card;
+        }));
+      };
+      const sync = () => {
+        if (!pane) return;
+        const label = pane.firstElementChild && pane.firstElementChild !== grid ? pane.firstElementChild.textContent : '';
+        pane.classList.toggle('rk-outfits-on', Rk.isEnabled(ctx.id) && outfits.length > 0 && /creations/i.test(label));
+        if (grid && !grid.isConnected) {
+          if (pane.firstElementChild) pane.firstElementChild.after(grid);
+          else pane.append(grid);
+        }
+        const count = nativeItems().length;
+        if (count === nativeCount) return;
+        const first = nativeCount === -1;
+        nativeCount = count;
+        if (first) return;
+        clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(async () => {
+          outfits = await userOutfits();
+          render();
+          sync();
+        }, 600);
+      };
+      Rk.observe('#costumes', async node => {
+        pane = node;
+        grid = el('div', { class: 'rk-avatar-outfits-grid' });
+        outfits = await userOutfits();
+        render();
+        sync();
+        new MutationObserver(records => {
+          if (records.every(record => grid.contains(record.target))) return;
+          sync();
+        }).observe(pane, { childList: true, subtree: true, characterData: true });
       });
-      holder.replaceWith(ui.section('Saved outfits', el('div', { class: 'rk-avatar-tiles' }, tiles), {
-        className: 'rk-avatar-outfits',
-        actions: el('span', { class: 'rk-muted' }, fmt.plural(outfits.length, 'outfit'))
-      }));
+      Rk.onSettings(sync);
     }
   });
 
@@ -1871,7 +2003,7 @@
     name: 'Quick outfit switcher',
     description: 'Adds a button to the top bar that lets you wear one of your saved outfits from any page.',
     default: false,
-    css: `
+    css: `${pinCss}
       .rk-avatar-quick { min-width: 240px; max-width: 280px; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
       .rk-avatar-quick .rk-menu-item { gap: 10px; }
       .rk-avatar-quick .rk-menu-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1879,30 +2011,16 @@
       .rk-avatar-quick-empty { padding: 12px; font-size: 13px; color: var(--rk-muted); }
       .rk-avatar-quick-row { display: flex; align-items: center; }
       .rk-avatar-quick-row > .rk-menu-item { flex: 1; min-width: 0; }
-      .rk-avatar-quick-pin { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-right: 4px; padding: 0; border: 0; border-radius: var(--rk-radius); background: transparent; color: var(--rk-muted); opacity: 0.45; cursor: pointer; transition: opacity var(--rk-fast) ease, background-color var(--rk-fast) ease; }
-      .rk-avatar-quick-row:hover .rk-avatar-quick-pin { opacity: 1; }
-      .rk-avatar-quick-pin:hover { background: var(--rk-hover); }
-      .rk-avatar-quick-pin[aria-pressed="true"] { color: var(--rk-accent); opacity: 1; }
+      .rk-avatar-quick-row .rk-avatar-pin { margin-right: 4px; }
+      .rk-avatar-quick-row:hover .rk-avatar-pin { opacity: 1; }
       .rk-avatar-quick-pinned { background: var(--rk-accent-soft); }
     `,
     run(ctx) {
       let outfits = null;
       let close = null;
       let busy = false;
-      const pinnedIds = () => {
-        const saved = Rk.store.get('avatar.pinnedOutfits', []);
-        return Array.isArray(saved) ? saved.filter(id => Rk.isId(id)).slice(0, 50) : [];
-      };
-      const togglePin = id => {
-        const pins = pinnedIds();
-        Rk.store.set('avatar.pinnedOutfits', pins.includes(id) ? pins.filter(pin => pin !== id) : [...pins, id].slice(0, 50));
-      };
       const loadOutfits = async () => {
-        if (outfits) return outfits;
-        const user = await Rk.me();
-        if (!user) return [];
-        const json = await fetchJson(`https://avatar.roblox.com/v1/users/${user.id}/outfits?page=1&itemsPerPage=50&isEditable=true`);
-        outfits = (json && Array.isArray(json.data) ? json.data : []).filter(outfit => outfit && Rk.isId(outfit.id)).slice(0, 50);
+        if (!outfits) outfits = await userOutfits();
         return outfits;
       };
       const wear = async (outfit, item) => {
@@ -1910,16 +2028,7 @@
         busy = true;
         item.disabled = true;
         try {
-          const details = await Rk.api.get(`https://avatar.roblox.com/v1/outfits/${outfit.id}/details`);
-          const assets = isObject(details) && Array.isArray(details.assets) ? details.assets.filter(asset => isObject(asset) && Rk.isId(asset.id)) : null;
-          if (!assets) throw new Error('unexpected outfit data');
-          const result = await Rk.api.post('https://avatar.roblox.com/v2/avatar/set-wearing-assets', { assets: assets.map(asset => (isObject(asset.meta) ? { id: Number(asset.id), meta: asset.meta } : { id: Number(asset.id) })) });
-          if (isObject(result) && result.success === false) throw new Error('wear rejected');
-          await Promise.allSettled([
-            isObject(details.bodyColors) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-body-colors', details.bodyColors) : null,
-            typeof details.playerAvatarType === 'string' ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: details.playerAvatarType }) : null,
-            isObject(details.scale) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-scales', details.scale) : null
-          ]);
+          await wearOutfit(outfit);
           ui.toast(`Wearing ${str(outfit.name, 100) || 'outfit'}`, { tone: 'success' });
           if (close) close();
         } catch {
@@ -1960,23 +2069,13 @@
         const saved = await loadOutfits();
         if (!list.isConnected) return;
         const render = () => {
-          const pins = pinnedIds();
-          const ordered = [
-            ...pins.map(id => saved.find(outfit => outfit.id === id)).filter(Boolean),
-            ...saved.filter(outfit => !pins.includes(outfit.id))
-          ];
-          list.replaceChildren(...ordered.map(outfit => {
+          const pins = pinnedOutfitIds();
+          list.replaceChildren(...pinnedFirst(saved).map(outfit => {
             const isPinned = pins.includes(outfit.id);
             const name = str(outfit.name, 100) || 'Outfit';
             const item = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem' }, ui.thumb(Rk.thumb('Outfit', outfit.id, '150x150'), { size: 36 }), el('span', null, name));
             item.addEventListener('click', () => wear(outfit, item));
-            const pin = el('button', { type: 'button', class: 'rk-avatar-quick-pin', 'aria-pressed': isPinned ? 'true' : 'false', 'aria-label': isPinned ? `Unpin ${name}` : `Pin ${name}`, title: isPinned ? 'Unpin' : 'Pin to top' }, icon('pin', 16));
-            pin.addEventListener('click', event => {
-              event.stopPropagation();
-              togglePin(outfit.id);
-              render();
-            });
-            return el('div', { class: `rk-avatar-quick-row${isPinned ? ' rk-avatar-quick-pinned' : ''}` }, item, pin);
+            return el('div', { class: `rk-avatar-quick-row${isPinned ? ' rk-avatar-quick-pinned' : ''}` }, item, pinButton(outfit, name, render));
           }));
         };
         if (!saved.length) list.replaceChildren(el('div', { class: 'rk-avatar-quick-empty' }, 'No saved outfits yet'));
