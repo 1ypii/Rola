@@ -63,7 +63,39 @@ const loadAudio = async src => {
   const response = await fetch(src);
   if (!response.ok) throw new Error(`audio request failed ${response.status}`);
   const buffer = await response.arrayBuffer();
-  return URL.createObjectURL(new Blob([buffer], { type: audioType(new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength))) }));
+  return new Blob([buffer], { type: audioType(new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength))) });
+};
+
+const openTracks = () => new Promise((resolve, reject) => {
+  const request = indexedDB.open('rola-music', 1);
+  request.onupgradeneeded = () => request.result.createObjectStore('tracks');
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+
+const readTrack = async id => {
+  const db = await openTracks();
+  return new Promise(resolve => {
+    const request = db.transaction('tracks').objectStore('tracks').get(id);
+    request.onsuccess = () => resolve(request.result && request.result.blob instanceof Blob ? request.result.blob : null);
+    request.onerror = () => resolve(null);
+  });
+};
+
+const saveTrack = async (id, blob) => {
+  const db = await openTracks();
+  const store = db.transaction('tracks', 'readwrite').objectStore('tracks');
+  store.put({ blob, at: Date.now() }, id);
+  const entries = [];
+  store.openCursor().onsuccess = event => {
+    const cursor = event.target.result;
+    if (cursor) {
+      entries.push([cursor.key, Number(cursor.value && cursor.value.at) || 0]);
+      cursor.continue();
+      return;
+    }
+    for (const [key] of entries.sort((a, b) => b[1] - a[1]).slice(3)) store.delete(key);
+  };
 };
 
 const release = audio => {
@@ -125,45 +157,57 @@ const stopMusic = () => {
   closeIfIdle();
 };
 
-const setMusic = message => {
+let loadingId = null;
+
+const setMusic = async message => {
   if (typeof message.id !== 'string') {
     stopMusic();
-    return;
+    return 'off';
   }
   const volume = Number.isFinite(message.volume) ? Math.min(Math.max(message.volume, 0), 1) : 0.4;
   if (music && musicId === message.id) {
     music.volume = volume;
-    return;
+    return 'playing';
   }
-  if (typeof message.src !== 'string' || !message.src.startsWith('https://')) return;
-  if (music) {
-    music.pause();
-    release(music);
-  }
-  const audio = new Audio();
-  const fail = () => {
-    if (music === audio) stopMusic();
-  };
-  music = audio;
-  musicId = message.id;
-  audio.loop = true;
-  audio.volume = volume;
-  audio.addEventListener('error', fail, { once: true });
-  loadAudio(message.src).then(url => {
-    if (music !== audio) {
-      URL.revokeObjectURL(url);
-      return null;
+  if (loadingId === message.id) return 'loading';
+  loadingId = message.id;
+  try {
+    let blob = await readTrack(message.id).catch(() => null);
+    if (!blob) {
+      if (typeof message.src !== 'string' || !message.src.startsWith('https://')) return 'need';
+      blob = await loadAudio(message.src).catch(() => null);
+      if (!blob) return 'unavailable';
+      saveTrack(message.id, blob).catch(() => {});
     }
-    audio.src = url;
-    return audio.play();
-  }).catch(fail);
+    if (music) {
+      music.pause();
+      release(music);
+    }
+    const audio = new Audio(URL.createObjectURL(blob));
+    music = audio;
+    musicId = message.id;
+    audio.loop = true;
+    audio.volume = volume;
+    audio.addEventListener('error', () => {
+      if (music === audio) stopMusic();
+    }, { once: true });
+    try {
+      await audio.play();
+    } catch {
+      if (music === audio) stopMusic();
+      return 'unavailable';
+    }
+    return 'playing';
+  } finally {
+    loadingId = null;
+  }
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || !message) return false;
   if (message.type === 'rk-music') {
-    setMusic(message);
-    return false;
+    setMusic(message).then(state => sendResponse({ state }), () => sendResponse({ state: 'unavailable' }));
+    return true;
   }
   if (message.type === 'rk-music-state') {
     sendResponse({ id: musicId });

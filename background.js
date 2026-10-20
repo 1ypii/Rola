@@ -174,17 +174,20 @@ const syncMusic = async () => {
   const open = await hasOffscreen();
   if (!tabs.length) {
     if (open) await chrome.runtime.sendMessage({ type: 'rk-music', id: null }).catch(() => {});
-    return;
+    return 'off';
   }
   const current = open ? await chrome.runtime.sendMessage({ type: 'rk-music-state' }).catch(() => null) : null;
   if (current && current.id === assetId) {
     await chrome.runtime.sendMessage({ type: 'rk-music', id: assetId, volume }).catch(() => {});
-    return;
+    return 'playing';
   }
-  const src = await audioUrl(assetId).catch(() => null);
-  if (!src) return;
   await openOffscreen();
-  await chrome.runtime.sendMessage({ type: 'rk-music', id: assetId, src, volume }).catch(() => {});
+  const stored = await chrome.runtime.sendMessage({ type: 'rk-music', id: assetId, volume }).catch(() => null);
+  if (stored && stored.state !== 'need') return stored.state;
+  const src = await audioUrl(assetId).catch(() => null);
+  if (!src) return 'unavailable';
+  const result = await chrome.runtime.sendMessage({ type: 'rk-music', id: assetId, src, volume }).catch(() => null);
+  return result ? result.state : 'unavailable';
 };
 
 const notify = (title, message, url) => {
@@ -509,7 +512,7 @@ const handlers = {
   },
   download: payload => download(payload || {}),
   sound: payload => playSound(payload).then(() => true),
-  music: () => syncMusic().then(() => true),
+  music: () => syncMusic(),
   unfriends: async () => {
     const log = (await chrome.storage.local.get(UNFRIENDS_KEY))[UNFRIENDS_KEY];
     return Array.isArray(log) ? log : [];

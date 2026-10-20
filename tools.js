@@ -1733,8 +1733,24 @@
       { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Roblox audio id', default: '' },
       { key: 'volume', label: 'Volume', type: 'number', min: 0, max: 100, step: 5, default: 40 }
     ],
-    run() {
-      Rk.bg('music').catch(() => {});
+    run(ctx) {
+      let lastId = null;
+      const sync = async () => {
+        const id = Rk.isEnabled(ctx.id) ? String(ctx.option('assetId') || '').trim() : '';
+        const first = lastId === null;
+        const changed = id !== lastId;
+        lastId = id;
+        if (!changed) return;
+        if (id && !/^\d{1,20}$/.test(id)) {
+          if (!first) ui.toast('Audio asset id has to be a number', { tone: 'warning' });
+          return;
+        }
+        if (id && !first) ui.toast('Loading music', { duration: 2500 });
+        const state = await Rk.bg('music').catch(() => null);
+        if (id && !first && state === 'unavailable') ui.toast('That audio could not load, it may be private or not an audio id', { tone: 'danger', duration: 6000 });
+      };
+      sync();
+      Rk.onSettings(sync);
     }
   });
 

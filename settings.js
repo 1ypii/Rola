@@ -458,7 +458,16 @@
     }
     if (def.type === 'text') {
       const field = ui.input({ value, maxLength: def.maxLength || 200, placeholder: def.placeholder || '' });
-      field.addEventListener('change', () => withLocalChange(() => Rk.setOption(entry.id, def.key, field.value.trim())));
+      let typing = 0;
+      const save = () => {
+        clearTimeout(typing);
+        if (field.value.trim() !== Rk.option(entry.id, def.key)) withLocalChange(() => Rk.setOption(entry.id, def.key, field.value.trim()));
+      };
+      field.addEventListener('input', () => {
+        clearTimeout(typing);
+        typing = setTimeout(save, 700);
+      });
+      field.addEventListener('change', save);
       return field;
     }
     if (def.type === 'color') {
