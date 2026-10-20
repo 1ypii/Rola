@@ -491,7 +491,8 @@
       const isBest = (row, ids) => {
         const id = rowId(row);
         if (id) return ids.has(id);
-        const texts = [...row.querySelectorAll('span, div, p, a')].filter(node => !node.firstElementChild).map(node => node.textContent.trim().toLowerCase());
+        const title = row.querySelector('.react-chat-row-title');
+        const texts = title ? [title.textContent.trim().toLowerCase()] : [...row.querySelectorAll('span, div, p, a')].filter(node => !node.firstElementChild).map(node => node.textContent.trim().toLowerCase());
         return [...ids].some(best => {
           const names = people.get(best);
           return Array.isArray(names) && names.some(name => texts.includes(name));
@@ -504,10 +505,24 @@
         const on = Rk.isEnabled(ctx.id);
         const ids = on ? bestIds() : new Set();
         if (on) loadPeople(ids);
-        const lists = new Set([...container.querySelectorAll('li:not(.rk-chat-label)')].map(row => row.parentElement));
-        for (const list of lists) {
+        const lists = new Map();
+        for (const title of container.querySelectorAll('.react-chat-row-title')) {
+          if (title.closest('.react-chat-dialog-shell')) continue;
+          let row = title;
+          while (row.parentElement && row.parentElement !== container && row.parentElement.querySelectorAll('.react-chat-row-title').length < 2) row = row.parentElement;
+          const list = row.parentElement;
+          if (!list || list === container) continue;
+          if (!lists.has(list)) lists.set(list, []);
+          lists.get(list).push(row);
+        }
+        for (const row of container.querySelectorAll('li:not(.rk-chat-label)')) {
+          if (row.closest('.react-chat-dialog-shell') || row.querySelector('.react-chat-row-title')) continue;
+          if (!lists.has(row.parentElement)) lists.set(row.parentElement, []);
+          lists.get(row.parentElement).push(row);
+        }
+        for (const [list, rows] of lists) {
           let found = false;
-          for (const row of list.querySelectorAll(':scope > li:not(.rk-chat-label)')) {
+          for (const row of rows) {
             const best = on && isBest(row, ids);
             row.classList.toggle('rk-chat-best', best);
             if (best) found = true;
@@ -515,7 +530,8 @@
           list.classList.toggle('rk-chat-pinned', on && found);
           list.classList.toggle('rk-chat-has-best', on && found);
           if (on && found && !list.querySelector(':scope > .rk-chat-label')) {
-            list.prepend(el('li', { class: 'rk-chat-label', role: 'presentation' }, 'Best friends'), el('li', { class: 'rk-chat-label rk-chat-label-rest', role: 'presentation' }, 'Friends'));
+            const tag = /^(UL|OL)$/.test(list.tagName) ? 'li' : 'div';
+            list.prepend(el(tag, { class: 'rk-chat-label', role: 'presentation' }, 'Best friends'), el(tag, { class: 'rk-chat-label rk-chat-label-rest', role: 'presentation' }, 'Friends'));
           }
           if (!(on && found)) for (const label of list.querySelectorAll(':scope > .rk-chat-label')) label.remove();
         }
