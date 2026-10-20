@@ -1564,17 +1564,28 @@
       let hovered = null;
       let lastHover = 0;
       const pack = () => soundPacks[ctx.option('pack')] || soundPacks.csgo;
-      const play = (parts, pitch = 1) => {
-        const volume = Math.min(Math.max(Number(ctx.option('volume')) || 0, 0), 100) / 100;
-        if (!volume) return;
+      const warm = () => {
         if (!audio) {
-          audio = new AudioContext();
+          audio = new AudioContext({ latencyHint: 'interactive' });
           noise = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
           const samples = noise.getChannelData(0);
           for (let i = 0; i < samples.length; i += 1) samples[i] = Math.random() * 2 - 1;
         }
-        if (audio.state === 'suspended') audio.resume().catch(() => {});
-        const start = audio.currentTime + 0.005;
+        if (audio.state === 'suspended') return audio.resume().catch(() => {});
+        return null;
+      };
+      const play = (parts, pitch = 1) => {
+        const volume = Math.min(Math.max(Number(ctx.option('volume')) || 0, 0), 100) / 100;
+        if (!volume) return;
+        const waking = warm();
+        if (waking) {
+          waking.then(() => schedule(parts, pitch, volume));
+          return;
+        }
+        schedule(parts, pitch, volume);
+      };
+      const schedule = (parts, pitch, volume) => {
+        const start = audio.currentTime;
         for (const part of parts) {
           const at = start + (part.delay || 0);
           const gain = audio.createGain();
@@ -1602,6 +1613,14 @@
           source.stop(at + part.length + 0.02);
         }
       };
+      const wake = () => {
+        if (Rk.isEnabled(ctx.id)) warm();
+      };
+      document.addEventListener('pointerdown', wake, { capture: true, once: true });
+      document.addEventListener('keydown', wake, { capture: true, once: true });
+      document.addEventListener('visibilitychange', () => {
+        if (audio && document.visibilityState === 'visible' && Rk.isEnabled(ctx.id)) warm();
+      });
       document.addEventListener('pointerover', event => {
         if (event.pointerType !== 'mouse' || !Rk.isEnabled(ctx.id) || !ctx.option('hover')) return;
         const target = event.target instanceof Element ? event.target.closest(targets) : null;

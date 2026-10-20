@@ -82,12 +82,18 @@ const soundAsset = settings => {
   return /^\d{1,20}$/.test(value) ? value : null;
 };
 
+const audioUrls = new Map();
+
 const audioUrl = async assetId => {
+  const cached = audioUrls.get(assetId);
+  if (cached && Date.now() - cached.at < 3600000) return cached.url;
   const json = await robloxRequest(`https://assetdelivery.roblox.com/v2/assetId/${assetId}`);
   const location = json && Array.isArray(json.locations) && json.locations[0] ? json.locations[0].location : null;
   if (typeof location !== 'string') throw new Error('audio has no location');
   const target = new URL(location);
   if (target.protocol !== 'https:' || !/(^|\.)rbxcdn\.com$/i.test(target.hostname)) throw new Error('audio host not allowed');
+  audioUrls.set(assetId, { url: target.href, at: Date.now() });
+  if (audioUrls.size > 20) audioUrls.delete(audioUrls.keys().next().value);
   return target.href;
 };
 

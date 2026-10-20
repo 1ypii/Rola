@@ -1,9 +1,21 @@
 let playing = 0;
 let music = null;
 let musicId = null;
+let context = null;
+let idleTimer = 0;
+const clips = new Map();
 
 const closeIfIdle = () => {
-  if (playing <= 0 && !music) chrome.runtime.sendMessage({ type: 'rk-sound-done' }).catch(() => {});
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (playing <= 0 && !music) chrome.runtime.sendMessage({ type: 'rk-sound-done' }).catch(() => {});
+  }, 30000);
+};
+
+const audioContext = async () => {
+  if (!context) context = new AudioContext({ latencyHint: 'interactive' });
+  if (context.state === 'suspended') await context.resume().catch(() => {});
+  return context;
 };
 
 const finish = () => {
@@ -15,8 +27,7 @@ const finish = () => {
 };
 
 const chime = async () => {
-  const context = new AudioContext();
-  await context.resume().catch(() => {});
+  const context = await audioContext();
   const now = context.currentTime;
   const notes = [[880, 0], [1318.51, 0.11]];
   let last = null;
@@ -34,14 +45,10 @@ const chime = async () => {
     last = tone;
   }
   if (context.state !== 'running') {
-    context.close();
     finish();
     return;
   }
-  last.addEventListener('ended', () => {
-    context.close();
-    finish();
-  }, { once: true });
+  last.addEventListener('ended', finish, { once: true });
 };
 
 const audioType = bytes => {
@@ -64,23 +71,49 @@ const release = audio => {
   audio.removeAttribute('src');
 };
 
-const clip = src => {
-  const audio = new Audio();
-  let done = false;
-  const end = fallback => {
-    if (done) return;
-    done = true;
-    release(audio);
-    if (fallback) chime();
-    else finish();
-  };
-  audio.volume = 0.8;
-  audio.addEventListener('ended', () => end(false), { once: true });
-  audio.addEventListener('error', () => end(true), { once: true });
-  loadAudio(src).then(url => {
-    audio.src = url;
-    return audio.play();
-  }).catch(() => end(true));
+const audibleRange = buffer => {
+  const threshold = 0.01;
+  let first = buffer.length;
+  let last = 0;
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    const samples = buffer.getChannelData(channel);
+    let start = 0;
+    while (start < first && Math.abs(samples[start]) < threshold) start += 1;
+    first = Math.min(first, start);
+    let end = samples.length - 1;
+    while (end > last && Math.abs(samples[end]) < threshold) end -= 1;
+    last = Math.max(last, end);
+  }
+  if (first >= last) return { offset: 0, duration: buffer.duration };
+  const offset = Math.max(0, first / buffer.sampleRate - 0.005);
+  return { offset, duration: Math.min(buffer.duration - offset, (last - first) / buffer.sampleRate + 0.05) };
+};
+
+const clip = async src => {
+  try {
+    const context = await audioContext();
+    let entry = clips.get(src);
+    if (!entry) {
+      const response = await fetch(src);
+      if (!response.ok) throw new Error(`audio request failed ${response.status}`);
+      const buffer = await context.decodeAudioData(await response.arrayBuffer());
+      entry = { buffer, ...audibleRange(buffer) };
+      clips.set(src, entry);
+      if (clips.size > 10) clips.delete(clips.keys().next().value);
+    }
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    gain.gain.value = 0.8;
+    source.buffer = entry.buffer;
+    source.connect(gain).connect(context.destination);
+    source.addEventListener('ended', () => {
+      gain.disconnect();
+      finish();
+    }, { once: true });
+    source.start(0, entry.offset, entry.duration);
+  } catch {
+    chime();
+  }
 };
 
 const stopMusic = () => {
@@ -137,6 +170,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   if (message.type !== 'rk-play') return false;
+  clearTimeout(idleTimer);
   playing += 1;
   if (typeof message.src === 'string' && message.src.startsWith('https://')) clip(message.src);
   else chime();

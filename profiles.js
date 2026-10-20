@@ -1867,7 +1867,8 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
 .rk-best-empty { padding: 4px 0; font-size: 14px; color: var(--rk-muted); }
 .rk-friends-heartable { position: relative; }
 .rk-friends-heart { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--rk-muted); cursor: pointer; opacity: 0; transition: opacity var(--rk-fast) ease, color var(--rk-fast) ease, transform var(--rk-fast) var(--rk-ease); }
-.rk-friends-heartable:hover > .rk-friends-heart, .rk-friends-heart:focus-visible, .rk-friends-heart[aria-pressed="true"] { opacity: 1; }
+.rk-best-card { position: relative; }
+.rk-friends-heartable:hover > .rk-friends-heart, .rk-best-card:hover > .rk-friends-heart, .rk-friends-heart:focus-visible, .rk-friends-heart[aria-pressed="true"] { opacity: 1; }
 .rk-friends-heart:hover { color: var(--rk-text-strong); }
 .rk-friends-heart[aria-pressed="true"] { color: #ff4d6d; }
 .rk-friends-heart[aria-pressed="true"] svg { fill: currentColor; }
@@ -1915,6 +1916,12 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         if (!ids.length) return;
         const [users, presence] = await Promise.all([safe(Rk.api.users(ids)), presenceOf(ids)]);
         const row = ui.section(`Best friends (${ids.length})`, el('div', { class: 'rk-friends-best' }, ids.map(userId => cardFor(userId, users, presence, 84))), { className: 'rk-home-best' });
+        const best = new Set(ids);
+        Rk.observe('.friends-carousel-tile', tile => {
+          const link = tile.querySelector('a[href*="/users/"]');
+          const match = link && /\/users\/(\d+)/.exec(link.getAttribute('href'));
+          if (match && best.has(Number(match[1]))) tile.classList.add('rk-hidden');
+        });
         Rk.observe('.friends-carousel-container', carousel => {
           if (row.isConnected) return;
           let block = carousel;
@@ -1969,7 +1976,19 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         }
         const [users, presence] = await Promise.all([safe(Rk.api.users(ids)), presenceOf(ids)]);
         if (bestList().join() !== ids.join()) return;
-        grid.replaceChildren(...ids.map(userId => cardFor(userId, users, presence, 84)));
+        grid.replaceChildren(...ids.map(userId => {
+          const card = cardFor(userId, users, presence, 84);
+          const heart = el('button', { type: 'button', class: 'rk-friends-heart', 'aria-pressed': 'true', 'aria-label': 'Remove from best friends', title: 'Remove from best friends' }, icon('heart', 16));
+          heart.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            Rk.store.set('friends.best', bestList().filter(item => item !== userId));
+            syncHearts();
+            render();
+          });
+          card.append(heart);
+          return card;
+        }));
       };
       const syncHearts = () => {
         const best = new Set(bestList());
@@ -1980,6 +1999,7 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
           const userId = userIdNear(card);
           const target = card.querySelector('.avatar-card-container') || card;
           let heart = target.querySelector(':scope > .rk-friends-heart');
+          card.classList.toggle('rk-hidden', Boolean(userId) && !hidden && best.has(userId));
           if (!userId || hidden) {
             if (heart) heart.remove();
             continue;
