@@ -4,10 +4,11 @@ const VALUES_KEY = 'rkbg:values';
 const STATE_KEY = 'rkbg:state';
 const UNFRIENDS_KEY = 'rkbg:unfriends';
 const PLAYTIME_KEY = 'rkbg:playtime';
+const DROPS_KEY = 'rkbg:drops';
 const VALUES_URL = 'https://api.rolimons.com/items/v2/itemdetails';
 const VALUES_TTL = 10 * 60 * 1000;
 const POLL_ALARM = 'rk-poll';
-const ALERT_FEATURES = ['tools.friendOnlineAlerts', 'trading.tradeAlerts', 'trading.tradeBadge', 'tools.robuxAlerts', 'tools.unfriendAlerts', 'tools.watchFriend', 'tools.wishlistAlerts', 'tools.gameUpdateAlerts', 'tools.playtime'];
+const ALERT_FEATURES = ['tools.friendOnlineAlerts', 'trading.tradeAlerts', 'trading.tradeBadge', 'tools.robuxAlerts', 'tools.unfriendAlerts', 'tools.watchFriend', 'tools.wishlistAlerts', 'tools.gameUpdateAlerts', 'tools.playtime', 'tools.itemDrops'];
 const NOTIFY_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAABeUlEQVR42u3dgU3DQBBE0XhFR9APlAb9QE2hARRi5c6z8b1fQHyZf7NnK5F8uQAAVmWb9cGv79frmYL6+dq29gLOFvoRMjahZ2WU8LMbcBN8tg0l/GwbSvhZCSX8rIQSflZCCT8rocSUpez+bAtK+FkJRlDnEYSQAOPnuDGkAUYQAcZPcAxpgBFEAAggAAQQgAAvXRby/Xns9d4+NCAWfuqaLQUkg+ggoVYNv8saauXwO6zFXZBDmAAQ4EGsJaMeljod+BpAAAggAAQQAAIIAAEEEAACCAABBIAAAnAwrX8R6/xLlgYQAAIIwNMK6PL//PRaatUv3mUNtXIAHTZArToCuozANg9inc4Ed0EEgAACQAABIGA1AbPeFoS/s9UAI4iAu6qC8eNHA4wg1N7KYNz4+bcBJMwN3wh6hjNAC+bt/rsbQMKc8HeNIBLGh7/7DCBhfEY1+wLCv81DYXrbxuObslIXFv6ABqzaiJEbb9oOPpsMbQcAjOYX6ZKCsgWRhdEAAAAASUVORK5CYII=';
 
 let valuesMemory = null;
@@ -98,10 +99,11 @@ const openOffscreen = async () => {
   } catch {}
 };
 
-const playSound = async () => {
+const playSound = async override => {
   const settings = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
-  if (settings && settings.enabled && settings.enabled['tools.alertSound'] === false) return;
-  const assetId = soundAsset(settings);
+  const custom = override && typeof override === 'object' && typeof override.assetId === 'string' && /^\d{1,20}$/.test(override.assetId.trim()) ? override.assetId.trim() : null;
+  if (!custom && settings && settings.enabled && settings.enabled['tools.alertSound'] === false) return;
+  const assetId = custom || soundAsset(settings);
   const src = assetId ? await audioUrl(assetId).catch(() => null) : null;
   await openOffscreen();
   await chrome.runtime.sendMessage({ type: 'rk-play', src }).catch(() => {});
@@ -365,6 +367,38 @@ const pollPlaytime = async (userId, state) => {
   await chrome.storage.local.set({ [PLAYTIME_KEY]: Object.fromEntries(kept) });
 };
 
+const pollDrops = async state => {
+  if (Date.now() - (state.dropsAt || 0) < 5 * 60 * 1000) return;
+  state.dropsAt = Date.now();
+  const json = await robloxRequest('https://catalog.roblox.com/v1/search/items/details?Category=1&CreatorName=Roblox&SortType=3&Limit=30');
+  const items = ((json && json.data) || []).filter(item => item && Number.isSafeInteger(item.id) && (item.itemType === 'Asset' || item.itemType === 'Bundle') && item.creatorTargetId === 1);
+  if (!items.length) return;
+  const keyOf = item => `${item.itemType === 'Bundle' ? 'b' : 'a'}${item.id}`;
+  const seen = Array.isArray(state.dropsSeen) ? state.dropsSeen : null;
+  state.dropsSeen = [...new Set([...items.map(keyOf), ...(seen || [])])].slice(0, 300);
+  if (!seen) return;
+  const now = Date.now();
+  const entries = items
+    .filter(item => !seen.includes(keyOf(item)))
+    .map(item => ({
+      id: item.id,
+      kind: item.itemType === 'Bundle' ? 'bundle' : 'asset',
+      name: cleanText(item.name, 120),
+      price: Number.isFinite(item.price) ? item.price : null,
+      created: Date.parse(item.itemCreatedUtc) || now,
+      time: now
+    }))
+    .filter(entry => now - entry.created < 3 * 24 * 60 * 60 * 1000);
+  if (!entries.length) return;
+  const log = (await chrome.storage.local.get(DROPS_KEY))[DROPS_KEY];
+  await chrome.storage.local.set({ [DROPS_KEY]: [...entries, ...(Array.isArray(log) ? log : [])].slice(0, 100) });
+  for (const entry of entries.slice(0, 3)) {
+    const price = entry.price === null ? 'New item from Roblox' : entry.price === 0 ? 'New free item from Roblox' : `New item from Roblox for ${entry.price.toLocaleString()} Robux`;
+    notify(entry.name || 'New Roblox item', price, `https://www.roblox.com/${entry.kind === 'bundle' ? 'bundles' : 'catalog'}/${entry.id}`);
+  }
+  if (entries.length > 3) notify('New Roblox items', `${entries.length - 3} more new items from Roblox`, 'https://www.roblox.com/catalog?CreatorName=Roblox&SortType=3');
+};
+
 const poll = async () => {
   const stored = await chrome.storage.local.get([SETTINGS_KEY, STATE_KEY, DATA_KEY]);
   const settings = stored[SETTINGS_KEY];
@@ -395,6 +429,8 @@ const poll = async () => {
   else delete state.gameUpdated;
   if (isOn(settings, 'tools.playtime')) jobs.push(pollPlaytime(me.id, state));
   else delete state.playing;
+  if (isOn(settings, 'tools.itemDrops')) jobs.push(pollDrops(state));
+  else delete state.dropsSeen;
   await Promise.allSettled(jobs);
   await chrome.storage.local.set({ [STATE_KEY]: state });
 };
@@ -416,7 +452,7 @@ const handlers = {
     return true;
   },
   download: payload => download(payload || {}),
-  sound: () => playSound().then(() => true),
+  sound: payload => playSound(payload).then(() => true),
   music: () => syncMusic().then(() => true),
   unfriends: async () => {
     const log = (await chrome.storage.local.get(UNFRIENDS_KEY))[UNFRIENDS_KEY];
@@ -425,6 +461,10 @@ const handlers = {
   playtime: async () => {
     const games = (await chrome.storage.local.get(PLAYTIME_KEY))[PLAYTIME_KEY];
     return games && typeof games === 'object' ? games : {};
+  },
+  drops: async () => {
+    const log = (await chrome.storage.local.get(DROPS_KEY))[DROPS_KEY];
+    return Array.isArray(log) ? log : [];
   },
   'poll-now': () => poll().then(() => true)
 };

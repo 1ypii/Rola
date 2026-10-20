@@ -1656,6 +1656,115 @@
     }
   });
 
+  const SPEND_TYPES = {
+    2: 'T-shirts', 11: 'Shirts', 12: 'Pants', 8: 'Hats', 41: 'Hair', 42: 'Face accessories', 43: 'Neck accessories',
+    44: 'Shoulder accessories', 45: 'Front accessories', 46: 'Back accessories', 47: 'Waist accessories', 18: 'Faces',
+    17: 'Heads', 19: 'Gear', 61: 'Emotes', 64: 'Layered t-shirts', 65: 'Layered shirts', 66: 'Layered pants', 67: 'Jackets',
+    68: 'Sweaters', 69: 'Shorts', 70: 'Shoes', 71: 'Shoes', 72: 'Dresses and skirts', 76: 'Eyebrows', 77: 'Eyelashes',
+    79: 'Dynamic heads', 3: 'Audio', 10: 'Models', 13: 'Decals', 24: 'Animations'
+  };
+
+  Rk.feature({
+    id: 'trading.spendingBreakdown',
+    category: 'trading',
+    name: 'Spending breakdown',
+    description: 'Shows how much Robux you spent per game, item type and creator, based on your recent purchases.',
+    default: false,
+    pages: ['transactions'],
+    css: `
+      .rk-trading-spend .rk-table td:first-child { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rk-trading-spend-note { margin-top: 8px; font-size: 12px; color: var(--rk-muted); }
+    `,
+    async run() {
+      const user = await Rk.me();
+      if (!user) return;
+      const body = el('div', null, el('div', { class: 'rk-skeleton', style: { height: '160px' } }));
+      let view = 'game';
+      let range = '30';
+      let purchases = null;
+      const types = new Map();
+      const keyFor = purchase => {
+        const { details, agent } = purchase;
+        if (view === 'game') {
+          const place = details.place && typeof details.place === 'object' ? details.place : null;
+          if (place && Rk.isId(place.placeId)) return [`g${place.universeId || place.placeId}`, typeof place.name === 'string' && place.name ? place.name : 'Experience', `/games/${place.placeId}`];
+          return ['shop', 'Avatar shop and other', null];
+        }
+        if (view === 'type') {
+          if (details.type === 'GamePass') return ['pass', 'Game passes', null];
+          if (details.type === 'DeveloperProduct') return ['product', 'Developer products', null];
+          if (details.type === 'PrivateServer') return ['server', 'Private servers', null];
+          if (details.type === 'Bundle') return ['bundle', 'Bundles', null];
+          const label = details.type === 'Asset' ? SPEND_TYPES[types.get(details.id)] : null;
+          return [`t${label || 'other'}`, label || 'Other items', null];
+        }
+        if (!agent || !Rk.isId(agent.id)) return ['unknown', 'Unknown seller', null];
+        const group = agent.type === 'Group';
+        return [`${group ? 'c' : 'u'}${agent.id}`, typeof agent.name === 'string' && agent.name ? agent.name : group ? 'Community' : 'User', group ? `/communities/${agent.id}` : `/users/${agent.id}/profile`];
+      };
+      const render = () => {
+        if (!purchases) return;
+        const since = range === 'all' ? 0 : Date.now() - Number(range) * DAY;
+        const kept = purchases.filter(purchase => purchase.time >= since);
+        if (!kept.length) {
+          body.replaceChildren(ui.empty('No purchases in this period'));
+          return;
+        }
+        const groups = new Map();
+        for (const purchase of kept) {
+          const [key, name, href] = keyFor(purchase);
+          const entry = groups.get(key) || { name, href, count: 0, spent: 0 };
+          entry.count += 1;
+          entry.spent += purchase.spent;
+          groups.set(key, entry);
+        }
+        const sorted = [...groups.values()].sort((a, b) => b.spent - a.spent);
+        const label = view === 'game' ? 'Experience' : view === 'type' ? 'Item type' : 'Creator';
+        body.replaceChildren(
+          ui.stats([
+            ['Total spent', money(sum(kept, purchase => purchase.spent))],
+            ['Purchases', fmt.num(kept.length)],
+            [view === 'game' ? 'Experiences' : view === 'type' ? 'Item types' : 'Creators', fmt.num(sorted.length)]
+          ]),
+          ui.table([{ label }, { label: 'Purchases', align: 'right' }, { label: 'Spent', align: 'right' }], sorted.slice(0, 25).map(entry => [
+            entry.href ? ui.link(entry.href, entry.name) : entry.name,
+            fmt.num(entry.count),
+            money(entry.spent)
+          ])),
+          el('div', { class: 'rk-trading-spend-note' }, `Based on your last ${fmt.plural(purchases.length, 'purchase')}${sorted.length > 25 ? `, top 25 of ${fmt.num(sorted.length)} shown` : ''}`)
+        );
+      };
+      const viewPicker = ui.select([['game', 'By experience'], ['type', 'By item type'], ['creator', 'By creator']], view, value => {
+        view = ['game', 'type', 'creator'].includes(value) ? value : 'game';
+        render();
+      });
+      const rangePicker = ui.select([['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['365', 'Last year'], ['all', 'All loaded']], range, value => {
+        range = ['7', '30', '90', '365', 'all'].includes(value) ? value : '30';
+        render();
+      });
+      (await slot(2)).append(ui.section('Spending breakdown', body, { className: 'rk-trading-spend', actions: [viewPicker, rangePicker] }));
+      const rows = await Rk.api.paged(`https://economy.roblox.com/v2/users/${user.id}/transactions?transactionType=Purchase`, { max: 1000, limit: 100 }).catch(() => null);
+      if (!Array.isArray(rows)) {
+        body.replaceChildren(ui.empty('Could not load your purchases'));
+        return;
+      }
+      purchases = rows.filter(row => row && typeof row === 'object' && row.currency && Number.isFinite(Number(row.currency.amount))).map(row => ({
+        time: Date.parse(row.created) || 0,
+        spent: Math.abs(Number(row.currency.amount)),
+        details: row.details && typeof row.details === 'object' ? row.details : {},
+        agent: row.agent && typeof row.agent === 'object' ? row.agent : null
+      }));
+      const assetIds = [...new Set(purchases.filter(purchase => purchase.details.type === 'Asset' && Rk.isId(purchase.details.id)).map(purchase => purchase.details.id))];
+      for (let i = 0; i < assetIds.length; i += 100) {
+        const json = await Rk.api.post('https://catalog.roblox.com/v1/catalog/items/details', { items: assetIds.slice(i, i + 100).map(id => ({ itemType: 'Asset', id })) }).catch(() => null);
+        for (const item of json && Array.isArray(json.data) ? json.data : []) {
+          if (item && Rk.isId(item.id) && Number.isInteger(item.assetType)) types.set(item.id, item.assetType);
+        }
+      }
+      render();
+    }
+  });
+
   Rk.feature({
     id: 'trading.transactionsExport',
     category: 'trading',

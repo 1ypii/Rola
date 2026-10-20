@@ -514,6 +514,28 @@
     )));
   };
 
+  const openDrops = async () => {
+    const body = el('div', null, ui.spinner());
+    const handle = toggleModal('drops', () => ({ title: 'Item drops', width: 520, content: body }));
+    if (!handle) return;
+    const log = await Rk.bg('drops').catch(() => []);
+    const entries = (Array.isArray(log) ? log : []).filter(entry => entry && Rk.isId(entry.id) && (entry.kind === 'asset' || entry.kind === 'bundle'));
+    if (!entries.length) {
+      body.replaceChildren(ui.empty('No new Roblox items since this was turned on'));
+      return;
+    }
+    body.replaceChildren(...entries.map(entry => ui.row(
+      [
+        ui.thumb(Rk.thumb(entry.kind === 'bundle' ? 'BundleThumbnail' : 'Asset', entry.id, '150x150'), { size: 44 }),
+        el('div', { class: 'rk-tools-person' },
+          ui.link(`/${entry.kind === 'bundle' ? 'bundles' : 'catalog'}/${entry.id}`, clip(entry.name, 80) || `Item ${entry.id}`),
+          Number.isFinite(entry.price) && entry.price > 0 ? ui.robux(entry.price) : el('span', { class: 'rk-muted' }, entry.price === 0 ? 'Free' : 'Off sale')
+        )
+      ],
+      el('span', { class: 'rk-muted', title: Number.isFinite(entry.created) ? new Date(entry.created).toLocaleString() : '' }, `Dropped ${fmt.ago(Number.isFinite(entry.created) ? entry.created : entry.time)}`)
+    )));
+  };
+
   const playtimeGames = async () => {
     const games = await Rk.bg('playtime').catch(() => ({}));
     return Object.entries(isObject(games) ? games : {})
@@ -754,6 +776,7 @@
     ['tools.playtime', 'Playtime', 'play', openPlaytime, 'hours played games stats'],
     ['tools.achievements', 'Achievements', 'star', openAchievements, 'badges goals milestones value'],
     ['tools.unfriendAlerts', 'Unfriends', 'users', openUnfriends, 'removed friends unfriended'],
+    ['tools.itemDrops', 'Item drops', 'bell', openDrops, 'new roblox items catalog released'],
     ['tools.quickNotes', 'Quick notes', 'edit', toggleQuickNotes, 'notepad scratch'],
     ['tools.shortcutHelp', 'Keyboard shortcuts', 'keyboard', openShortcuts, 'hotkeys keys help']
   ];
@@ -1617,6 +1640,45 @@
     options: [
       { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Default chime', default: '' }
     ]
+  });
+
+  Rk.feature({
+    id: 'tools.itemDrops',
+    category: 'tools',
+    name: 'Roblox item drops',
+    description: 'Get a desktop notification when Roblox releases a new item, and see recent drops with when they dropped in quick search.',
+    default: false,
+    css: `
+      .rk-tools-person {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+    `,
+    run: pollNow
+  });
+
+  Rk.feature({
+    id: 'tools.purchaseFailSound',
+    category: 'tools',
+    name: 'Not enough Robux sound',
+    description: 'Plays a Roblox audio when a purchase fails because you do not have enough Robux.',
+    default: false,
+    options: [
+      { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Roblox audio id', default: '' }
+    ],
+    run(ctx) {
+      const failed = /insufficient (robux|funds)|you need more robux|purchase failed, insufficient|need .* more to purchase/i;
+      let last = 0;
+      const check = node => {
+        if (!Rk.isEnabled(ctx.id) || !failed.test(node.textContent || '')) return;
+        const assetId = clip(ctx.option('assetId'), 20);
+        if (!/^\d{1,20}$/.test(assetId) || Date.now() - last < 3000) return;
+        last = Date.now();
+        Rk.bg('sound', { assetId }).catch(() => {});
+      };
+      Rk.observe('.modal-insufficient-funds, .modal-title, [role="dialog"] h1, [role="dialog"] h2, .modal-message', check);
+    }
   });
 
   Rk.feature({

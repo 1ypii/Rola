@@ -375,6 +375,168 @@
   });
 
   Rk.feature({
+    id: 'site.pendingRobux',
+    category: 'site',
+    name: 'Pending Robux in header',
+    description: 'Shows your pending Robux in brackets next to your balance.',
+    default: false,
+    css: `
+      .rk-site-pending {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        margin-left: 4px;
+        font-weight: 400;
+        white-space: nowrap;
+        opacity: 0.75;
+      }
+      .rk-site-pending .rk-icon {
+        width: 14px;
+        height: 14px;
+      }
+    `,
+    run(ctx) {
+      const full = new Intl.NumberFormat();
+      const short = value => {
+        if (value < 10000) return full.format(value);
+        const text = String(value);
+        const suffix = ['', 'K', 'M', 'B', 'T'][Math.min(Math.floor(Math.log(value) / Math.log(1000)), 4)];
+        const cut = value < 1e6 ? 3 : value < 1e9 ? 6 : value < 1e12 ? 9 : 12;
+        return text.slice(0, text.length - cut) + suffix;
+      };
+      let pending = null;
+      let loadedAt = 0;
+      const load = async () => {
+        if (Date.now() - loadedAt < 300000) return pending;
+        loadedAt = Date.now();
+        const user = await Rk.me();
+        const json = user ? await Rk.api.get(`https://economy.roblox.com/v2/users/${user.id}/transaction-totals?timeFrame=Year&transactionType=summary`).catch(() => null) : null;
+        const value = json && Number(json.pendingRobuxTotal);
+        pending = Number.isSafeInteger(value) && value > 0 ? value : null;
+        return pending;
+      };
+      Rk.observe('#nav-robux-amount', node => {
+        const label = el('span', { class: 'rk-site-pending', title: 'Pending Robux' });
+        const update = async () => {
+          const value = Rk.isEnabled(ctx.id) && !Rk.isEnabled('tools.fakeRobux') ? await load() : null;
+          if (!node.isConnected) return;
+          if (value === null || !Rk.isEnabled(ctx.id) || Rk.isEnabled('tools.fakeRobux')) {
+            label.remove();
+            return;
+          }
+          label.replaceChildren('(', icon('robux', 14), `+ ${short(value)} pending)`);
+          label.title = `${full.format(value)} pending Robux`;
+          if (label.previousElementSibling !== node) node.after(label);
+        };
+        const off = Rk.onSettings(() => (node.isConnected ? update() : off()));
+        update();
+      });
+    }
+  });
+
+  Rk.feature({
+    id: 'site.chatBestFriends',
+    category: 'site',
+    name: 'Best friends first in chat',
+    description: 'Pins your best friends to the top of the chat list under a Best friends label.',
+    default: false,
+    css: `
+      .rk-chat-pinned {
+        display: flex !important;
+        flex-direction: column;
+      }
+      .rk-chat-pinned > .rk-chat-best {
+        order: -2;
+      }
+      .rk-chat-label {
+        order: -3;
+        list-style: none;
+        padding: 8px 12px 4px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--rk-muted);
+      }
+      .rk-chat-label.rk-chat-label-rest {
+        order: -1;
+      }
+      .rk-chat-pinned:not(.rk-chat-has-best) > .rk-chat-label {
+        display: none;
+      }
+    `,
+    run(ctx) {
+      const people = new Map();
+      let queued = false;
+      const bestIds = () => {
+        const list = Rk.store.get('friends.best', []);
+        return new Set((Array.isArray(list) ? list : []).filter(id => Rk.isId(id)).slice(0, 200));
+      };
+      const loadPeople = async ids => {
+        const missing = [...ids].filter(id => !people.has(id));
+        if (!missing.length) return;
+        for (const id of missing) people.set(id, null);
+        const json = await Rk.api.post('https://users.roblox.com/v1/users', { userIds: missing.slice(0, 100), excludeBannedUsers: false }).catch(() => null);
+        for (const user of json && Array.isArray(json.data) ? json.data : []) {
+          if (user && Rk.isId(user.id)) people.set(user.id, [user.name, user.displayName].filter(name => typeof name === 'string' && name).map(name => name.toLowerCase()));
+        }
+        schedule();
+      };
+      const rowId = row => {
+        const tagged = row.matches('[data-user-id], [data-userid], [data-target-id]') ? row : row.querySelector('[data-user-id], [data-userid], [data-target-id]');
+        const raw = tagged ? tagged.getAttribute('data-user-id') || tagged.getAttribute('data-userid') || tagged.getAttribute('data-target-id') : null;
+        if (raw && /^\d+$/.test(raw)) return Number(raw);
+        const link = row.querySelector('a[href*="/users/"]');
+        const match = link && /\/users\/(\d+)/.exec(link.getAttribute('href'));
+        return match ? Number(match[1]) : null;
+      };
+      const isBest = (row, ids) => {
+        const id = rowId(row);
+        if (id) return ids.has(id);
+        const texts = [...row.querySelectorAll('span, div, p, a')].filter(node => !node.firstElementChild).map(node => node.textContent.trim().toLowerCase());
+        return [...ids].some(best => {
+          const names = people.get(best);
+          return Array.isArray(names) && names.some(name => texts.includes(name));
+        });
+      };
+      const apply = () => {
+        queued = false;
+        const container = document.getElementById('chat-container');
+        if (!container) return;
+        const on = Rk.isEnabled(ctx.id);
+        const ids = on ? bestIds() : new Set();
+        if (on) loadPeople(ids);
+        const lists = new Set([...container.querySelectorAll('li:not(.rk-chat-label)')].map(row => row.parentElement));
+        for (const list of lists) {
+          let found = false;
+          for (const row of list.querySelectorAll(':scope > li:not(.rk-chat-label)')) {
+            const best = on && isBest(row, ids);
+            row.classList.toggle('rk-chat-best', best);
+            if (best) found = true;
+          }
+          list.classList.toggle('rk-chat-pinned', on && found);
+          list.classList.toggle('rk-chat-has-best', on && found);
+          if (on && found && !list.querySelector(':scope > .rk-chat-label')) {
+            list.prepend(el('li', { class: 'rk-chat-label', role: 'presentation' }, 'Best friends'), el('li', { class: 'rk-chat-label rk-chat-label-rest', role: 'presentation' }, 'Friends'));
+          }
+          if (!(on && found)) for (const label of list.querySelectorAll(':scope > .rk-chat-label')) label.remove();
+        }
+      };
+      const schedule = () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(apply);
+      };
+      Rk.observe('#chat-container', container => {
+        new MutationObserver(records => {
+          if (records.every(record => [...record.addedNodes, ...record.removedNodes].every(node => node.nodeType === 1 && node.classList.contains('rk-chat-label')))) return;
+          schedule();
+        }).observe(container, { childList: true, subtree: true });
+        schedule();
+      });
+      Rk.onSettings(schedule);
+    }
+  });
+
+  Rk.feature({
     id: 'site.smoothScroll',
     category: 'site',
     name: 'Smooth scrolling',

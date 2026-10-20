@@ -1076,6 +1076,29 @@
   });
 
   Rk.feature({
+    id: 'discovery.hideRecommended',
+    category: 'discovery',
+    name: 'Hide recommended for you',
+    description: 'Hides the Recommended For You row on home.',
+    default: false,
+    pages: ['home'],
+    css: '.rk-recommended-hidden { display: none !important; }',
+    run(ctx) {
+      const rows = new Set();
+      sortHeadings((title, row) => {
+        rows.add(row);
+        row.classList.toggle('rk-recommended-hidden', Rk.isEnabled(ctx.id));
+      }, title => /^recommended for you\b/.test(title));
+      Rk.onSettings(() => {
+        for (const row of rows) {
+          if (!row.isConnected) rows.delete(row);
+          else row.classList.toggle('rk-recommended-hidden', Rk.isEnabled(ctx.id));
+        }
+      });
+    }
+  });
+
+  Rk.feature({
     id: 'discovery.compactCards',
     category: 'discovery',
     name: 'Compact cards',

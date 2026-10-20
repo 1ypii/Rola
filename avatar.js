@@ -1327,6 +1327,150 @@
   });
 
   Rk.feature({
+    id: 'avatar.keepR6',
+    category: 'avatar',
+    name: 'Stay on R6',
+    description: 'When equipping a dynamic head or face makes the editor switch you to R15, puts you back on R6. Picking R15 yourself still works.',
+    default: false,
+    pages: ['avatar'],
+    async run(ctx) {
+      const editor = await Rk.waitFor('#avatar-react-container');
+      const controls = 'button, [role="button"], [role="tab"], [role="radio"], label';
+      let type = avatarType(await Rk.api.get(AVATAR_URL).catch(() => null));
+      let reverted = false;
+      let checking = false;
+      let again = false;
+      const typeControl = name => [...editor.querySelectorAll(controls)].find(node => node.textContent.trim() === name && !node.closest(OURS)) || null;
+      editor.addEventListener('pointerdown', event => {
+        const target = event.target instanceof Element ? event.target.closest(controls) : null;
+        const text = target ? target.textContent.trim() : '';
+        if (!event.isTrusted || (text !== 'R6' && text !== 'R15')) return;
+        type = text;
+        reverted = false;
+      }, true);
+      const check = async () => {
+        if (!Rk.isEnabled(ctx.id)) return;
+        if (checking) {
+          again = true;
+          return;
+        }
+        checking = true;
+        const current = avatarType(await Rk.api.get(AVATAR_URL).catch(() => null));
+        checking = false;
+        if (current && type === 'R6' && current === 'R15') {
+          if (reverted) {
+            type = 'R15';
+            reverted = false;
+            ui.toast('Roblox needs R15 for what you equipped', { tone: 'warning' });
+          } else {
+            reverted = true;
+            const control = typeControl('R6');
+            if (control) control.click();
+            else await Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: 'R6' }).catch(() => null);
+            ui.toast(control ? 'Kept your avatar on R6' : 'Kept your avatar on R6, reload the editor to see it', { tone: 'success' });
+          }
+        } else if (current) {
+          if (current === type) reverted = false;
+          else if (!reverted) type = current;
+        }
+        if (again) {
+          again = false;
+          check();
+        }
+      };
+      Rk.observe('#avatar-react-container .left-wrapper-placeholder', preview => {
+        new MutationObserver(check).observe(preview, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+      });
+    }
+  });
+
+  const CLASSIC_CAMERA = { distanceScale: -1, fieldOfViewDeg: 30, yRotDeg: 0 };
+
+  const cleanPose = entry => {
+    if (!isObject(entry) || (entry.thumbnailType !== 1 && entry.thumbnailType !== 2)) return null;
+    const camera = isObject(entry.camera) ? entry.camera : {};
+    const number = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+    const emote = Number(entry.emoteAssetId);
+    return {
+      thumbnailType: entry.thumbnailType,
+      emoteAssetId: Number.isSafeInteger(emote) && emote > 0 ? emote : 0,
+      camera: {
+        distanceScale: number(camera.distanceScale, CLASSIC_CAMERA.distanceScale),
+        fieldOfViewDeg: number(camera.fieldOfViewDeg, CLASSIC_CAMERA.fieldOfViewDeg),
+        yRotDeg: number(camera.yRotDeg, CLASSIC_CAMERA.yRotDeg)
+      }
+    };
+  };
+
+  const isClassicPose = pose => pose.emoteAssetId === 0 && pose.camera.distanceScale === CLASSIC_CAMERA.distanceScale && pose.camera.fieldOfViewDeg === CLASSIC_CAMERA.fieldOfViewDeg && pose.camera.yRotDeg === CLASSIC_CAMERA.yRotDeg;
+
+  Rk.feature({
+    id: 'avatar.classicPose',
+    category: 'avatar',
+    name: 'Classic thumbnail pose',
+    description: 'Adds a Classic / Custom switch under your avatar in the editor. Classic puts your avatar pictures back in the old default pose, Custom brings your own pose back.',
+    default: false,
+    pages: ['avatar'],
+    css: `
+      .rk-avatar-pose { display: flex; gap: 2px; margin-top: 10px; padding: 3px; border-radius: var(--rk-radius); background: var(--rk-shift); }
+      .rk-avatar-pose button { flex: 1; height: 30px; padding: 0 12px; border: 0; border-radius: calc(var(--rk-radius) - 2px); background: transparent; color: var(--rk-muted); font-family: var(--rk-font); font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color var(--rk-fast) ease, color var(--rk-fast) ease, box-shadow var(--rk-fast) ease; }
+      .rk-avatar-pose button:hover { color: var(--rk-text-strong); }
+      .rk-avatar-pose button[aria-pressed="true"] { background: var(--rk-bg); color: var(--rk-text-strong); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
+      .rk-avatar-pose[aria-busy="true"] { opacity: 0.6; pointer-events: none; }
+    `,
+    run() {
+      const currentPoses = async () => {
+        const json = await Rk.api.get('https://avatar.roblox.com/v1/avatar/thumbnail-customizations').catch(() => null);
+        const list = Array.isArray(json) ? json : isObject(json) ? Object.values(json).find(Array.isArray) || [] : [];
+        return list.map(cleanPose).filter(Boolean);
+      };
+      const savedPoses = () => {
+        const saved = Rk.store.get('avatar.customPose', []);
+        return Array.isArray(saved) ? saved.map(cleanPose).filter(Boolean).slice(0, 2) : [];
+      };
+      const apply = poses => Promise.all(poses.map(pose => Rk.api.post('https://avatar.roblox.com/v1/avatar/thumbnail-customization', pose)));
+      const classic = el('button', { type: 'button', 'aria-pressed': 'false' }, 'Classic');
+      const custom = el('button', { type: 'button', 'aria-pressed': 'false' }, 'Custom');
+      const control = el('div', { class: 'rk-avatar-pose rk-avatar-pose-control', role: 'group', 'aria-label': 'Thumbnail pose', title: 'Pose used for your avatar pictures' }, classic, custom);
+      const mark = isClassic => {
+        classic.setAttribute('aria-pressed', isClassic ? 'true' : 'false');
+        custom.setAttribute('aria-pressed', isClassic ? 'false' : 'true');
+      };
+      const busy = async action => {
+        control.setAttribute('aria-busy', 'true');
+        try {
+          await action();
+        } catch {
+          ui.toast('Could not change your thumbnail pose', { tone: 'danger' });
+        }
+        control.removeAttribute('aria-busy');
+      };
+      classic.addEventListener('click', () => busy(async () => {
+        const current = await currentPoses();
+        const own = current.filter(pose => !isClassicPose(pose));
+        if (own.length) Rk.store.set('avatar.customPose', own);
+        await apply([1, 2].map(thumbnailType => ({ thumbnailType, emoteAssetId: 0, camera: { ...CLASSIC_CAMERA } })));
+        mark(true);
+        ui.toast('Switched to the classic pose, your pictures can take a minute to update', { tone: 'success' });
+      }));
+      custom.addEventListener('click', () => busy(async () => {
+        const saved = savedPoses();
+        if (!saved.length) {
+          ui.toast('No custom pose saved yet, set one in the editor first', { tone: 'warning' });
+          return;
+        }
+        await apply(saved);
+        mark(false);
+        ui.toast('Switched back to your custom pose, your pictures can take a minute to update', { tone: 'success' });
+      }));
+      currentPoses().then(poses => mark(poses.length > 0 && poses.every(isClassicPose)));
+      Rk.observe('#avatar-react-container .left-wrapper-placeholder', preview => {
+        if (!control.isConnected) preview.append(control);
+      });
+    }
+  });
+
+  Rk.feature({
     id: 'avatar.wearingList',
     category: 'avatar',
     name: 'Currently wearing',

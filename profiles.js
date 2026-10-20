@@ -566,13 +566,11 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     id: 'profiles.nicknames',
     category: 'profiles',
     name: 'Nicknames',
-    description: 'Lets you set private nicknames that show on profiles and friend lists.',
+    description: 'Lets you set private nicknames that replace the display names of people on profiles and friend lists. Hover the name to see the real one.',
     default: false,
     pages: ['profile', 'friends', 'home'],
-    css: `${headerCss}
-.rk-pill.rk-profile-nick { display: inline-block; max-width: 100%; margin-top: 2px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; }
-`,
-    async run() {
+    css: headerCss,
+    async run(ctx) {
       const nicknames = () => {
         const map = Rk.store.get('nicknames', {});
         return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
@@ -581,20 +579,49 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         const value = nicknames()[userId];
         return typeof value === 'string' ? value.trim().slice(0, 40) : '';
       };
-      Rk.observe('.avatar-name, .friends-carousel-tile-name', name => {
-        const next = name.nextElementSibling;
-        if (next && next.classList.contains('rk-profile-nick')) return;
-        const userId = userIdNear(name);
-        const nick = userId ? nicknameOf(userId) : '';
-        if (nick) name.after(el('span', { class: 'rk-pill rk-pill-accent rk-profile-nick', title: 'Your nickname' }, nick));
+      const nameText = node => document.createTreeWalker(node, NodeFilter.SHOW_TEXT, { acceptNode: text => (text.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP) }).nextNode();
+      const tracked = new Map();
+      const apply = (node, userId) => {
+        const text = nameText(node);
+        if (!text) return;
+        const nick = Rk.isEnabled(ctx.id) && userId ? nicknameOf(userId) : '';
+        const real = node.dataset.rkRealName;
+        if (nick) {
+          const current = text.nodeValue.trim();
+          if (current !== node.dataset.rkNick) node.dataset.rkRealName = current;
+          if (current !== nick) text.nodeValue = nick;
+          node.dataset.rkNick = nick;
+          if (node.title !== node.dataset.rkRealName) node.title = node.dataset.rkRealName;
+          return;
+        }
+        if (real === undefined) return;
+        if (text.nodeValue.trim() === node.dataset.rkNick) text.nodeValue = real;
+        delete node.dataset.rkRealName;
+        delete node.dataset.rkNick;
+        node.removeAttribute('title');
+      };
+      const track = (node, userId) => {
+        if (tracked.has(node)) return;
+        tracked.set(node, userId);
+        apply(node, userId);
+        new MutationObserver(() => apply(node, tracked.get(node))).observe(node, { childList: true, subtree: true, characterData: true });
+      };
+      const refresh = () => {
+        for (const [node, userId] of tracked) {
+          if (node.isConnected) apply(node, userId);
+          else tracked.delete(node);
+        }
+      };
+      Rk.onSettings(refresh);
+      Rk.observe('.avatar-name, .friends-carousel-display-name, .friends-carousel-tile-name', name => {
+        if (name.querySelector('.avatar-name, .friends-carousel-display-name')) return;
+        track(name, userIdNear(name));
       });
       const id = profileId();
       if (!id || await ownProfile()) return;
-      const pill = ui.pill(nicknameOf(id), 'accent', { title: 'Your nickname' });
-      pill.classList.toggle('rk-hidden', !nicknameOf(id));
-      addPill(pill, 2);
+      Rk.observe('#profile-header-title-container-name', name => track(name, id));
       addTool(ui.button('Set nickname', { icon: 'edit', onClick: async () => {
-        const value = await ui.prompt('Only you can see it. Leave it empty to remove it.', { title: 'Set nickname', placeholder: 'Nickname', value: nicknameOf(id), maxLength: 40 });
+        const value = await ui.prompt('Only you can see it. It replaces their display name for you. Leave it empty to remove it.', { title: 'Set nickname', placeholder: 'Nickname', value: nicknameOf(id), maxLength: 40 });
         if (value === null) return;
         const text = value.trim().slice(0, 40);
         if (text === nicknameOf(id)) return;
@@ -602,8 +629,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         if (text) map[id] = text;
         else delete map[id];
         Rk.store.set('nicknames', map);
-        pill.textContent = text;
-        pill.classList.toggle('rk-hidden', !text);
+        refresh();
         ui.toast(text ? 'Nickname saved' : 'Nickname removed', { tone: 'success' });
       } }), 8);
     }
@@ -1812,27 +1838,57 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
     id: 'profiles.bestFriends',
     category: 'profiles',
     name: 'Best friends',
-    description: 'Star friends on their profile and see them at the top of your friends page.',
+    description: 'Mark friends as best friends on their profile and see them in their own list above your friends.',
     default: false,
     pages: ['profile', 'friends'],
-    css: `${headerCss}${tilesCss}${friendsCss}
-.rk-friends-best { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
-.rk-friends-best > .rk-profile-tile { flex: 0 0 88px; }
-.rk-friends-dot { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; box-sizing: border-box; border: 2px solid var(--rk-bg); border-radius: 50%; }
-.rk-friends-dot[data-state="online"] { background: var(--rk-accent); }
-.rk-friends-dot[data-state="game"] { background: var(--rk-success); }
-.rk-friends-dot[data-state="studio"] { background: var(--rk-warning); }
-.rk-friends-dot[data-state="offline"] { display: none; }
+    css: `${headerCss}
+.rk-friends-best-section { margin-bottom: 24px; }
+.rk-friends-best { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.rk-best-card { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; padding: 14px 10px 12px; border-radius: 8px; background: var(--rk-surface); color: var(--rk-text) !important; text-decoration: none !important; transition: background-color var(--rk-fast) ease; }
+.rk-best-card:hover { background: var(--rk-hover); }
+.rk-best-face { position: relative; display: inline-flex; }
+.rk-best-dot { position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px; box-sizing: border-box; border: 3px solid var(--rk-surface); border-radius: 50%; }
+.rk-best-dot[data-state="online"] { background: #00a2ff; }
+.rk-best-dot[data-state="game"] { background: #02b757; }
+.rk-best-dot[data-state="studio"] { background: #f68802; }
+.rk-best-dot[data-state="offline"] { display: none; }
+.rk-best-name { display: flex; align-items: center; gap: 4px; max-width: 100%; font-size: 15px; font-weight: 600; color: var(--rk-text-strong); }
+.rk-best-name > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rk-best-status { max-width: 100%; overflow: hidden; font-size: 12px; color: var(--rk-muted); white-space: nowrap; text-overflow: ellipsis; }
+.rk-best-status[data-state="online"] { color: #00a2ff; }
+.rk-best-status[data-state="game"] { color: #02b757; }
+.rk-best-status[data-state="studio"] { color: #f68802; }
 `,
     async run() {
       const bestList = () => {
         const list = Rk.store.get('friends.best', []);
         return Array.isArray(list) ? [...new Set(list.map(Number).filter(Rk.isId))].slice(0, 50) : [];
       };
+      const friendsAmong = async ids => {
+        const me = await Rk.me();
+        if (!me || !ids.length) return null;
+        const json = await safe(Rk.api.get(`https://friends.roblox.com/v1/users/${me.id}/friends/statuses?userIds=${ids.join(',')}`));
+        if (!json || !Array.isArray(json.data)) return null;
+        return new Set(json.data.filter(entry => entry && entry.status === 'Friends').map(entry => Number(entry.id)).filter(Rk.isId));
+      };
+      const prune = async () => {
+        const ids = bestList();
+        const friends = await friendsAmong(ids);
+        if (!friends) return ids;
+        const kept = ids.filter(id => friends.has(id));
+        if (kept.length !== ids.length) Rk.store.set('friends.best', kept);
+        return kept;
+      };
       if (Rk.page().type === 'profile') {
         const id = profileId();
         const me = await Rk.me();
         if (!id || !me || me.id === id) return;
+        const friends = await friendsAmong([id]);
+        if (!friends) return;
+        if (!friends.has(id)) {
+          if (bestList().includes(id)) Rk.store.set('friends.best', bestList().filter(item => item !== id));
+          return;
+        }
         const button = ui.button('Best friend', { icon: 'star', onClick: () => {
           const list = bestList();
           const active = list.includes(id);
@@ -1852,19 +1908,95 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         return;
       }
       if (!await ownFriendsPage()) return;
-      const ids = bestList();
+      const ids = await prune();
       if (!ids.length) return;
       const [users, presence] = await Promise.all([safe(Rk.api.users(ids)), presenceOf(ids)]);
-      const labels = { online: 'Online', game: 'In game', studio: 'In Studio' };
-      const tiles = ids.map(userId => {
+      const states = ['offline', 'online', 'game', 'studio'];
+      const cards = ids.map(userId => {
         const user = users && users.get(userId);
-        const state = ['offline', 'online', 'game', 'studio'][presenceType(presence.get(userId))] || 'offline';
-        return tile(`/users/${userId}/profile`, el('span', { class: 'rk-profile-face' },
-          ui.thumb(Rk.thumb('AvatarHeadShot', userId, '150x150'), { size: 64, round: true }),
-          el('span', { class: 'rk-friends-dot', dataset: { state }, title: labels[state] || null })
-        ), user ? String(user.displayName || user.name) : `User ${userId}`, mark(isVerified(userId, user && user.hasVerifiedBadge)));
+        const entry = presence.get(userId);
+        const state = states[presenceType(entry)] || 'offline';
+        const where = entry && typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : '';
+        const status = { online: 'Online', game: where || 'In game', studio: where ? `Studio: ${where}` : 'In Studio', offline: 'Offline' }[state];
+        const name = user ? String(user.displayName || user.name) : `User ${userId}`;
+        return el('a', { class: 'rk-best-card', href: `/users/${userId}/profile`, title: user ? `@${user.name}` : name },
+          el('span', { class: 'rk-best-face' },
+            ui.thumb(Rk.thumb('AvatarHeadShot', userId, '150x150'), { size: 84, round: true }),
+            el('span', { class: 'rk-best-dot', dataset: { state } })
+          ),
+          el('span', { class: 'rk-best-name' }, el('span', null, name), mark(isVerified(userId, user && user.hasVerifiedBadge))),
+          el('span', { class: 'rk-best-status', dataset: { state } }, status)
+        );
       });
-      place(friendsHost(), ui.section('Best friends', el('div', { class: 'rk-friends-best' }, tiles), { className: 'rk-friends-best-section' }), 1);
+      const section = ui.section(`Best friends (${ids.length})`, el('div', { class: 'rk-friends-best' }, cards), { className: 'rk-friends-best-section' });
+      Rk.observe(CARD, card => {
+        if (section.isConnected || card.closest('.rk-friends-best-section')) return;
+        const list = card.closest('ul, ol') || card.parentElement;
+        if (!list || !list.parentElement) return;
+        let block = list;
+        for (let depth = 0; depth < 4 && block.parentElement; depth += 1) {
+          if (block.querySelector(':scope > .container-header, :scope > h1, :scope > h2, :scope > h3')) break;
+          block = block.parentElement;
+        }
+        if (!block.querySelector(':scope > .container-header, :scope > h1, :scope > h2, :scope > h3')) block = list;
+        block.before(section);
+      });
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.groupFunds',
+    category: 'profiles',
+    name: 'Community funds on hover',
+    description: 'Hover a community you own to see how many Robux it has.',
+    default: false,
+    css: `
+.rk-group-funds { position: absolute; z-index: 2147481000; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--rk-border); border-radius: 8px; background: var(--rk-bg); box-shadow: var(--rk-shadow); color: var(--rk-text); font-family: var(--rk-font); font-size: 13px; pointer-events: none; opacity: 0; transform: translateY(4px); transition: opacity var(--rk-fast) ease, transform var(--rk-fast) var(--rk-ease); }
+.rk-group-funds.rk-group-funds-open { opacity: 1; transform: none; }
+.rk-group-funds .rk-robux { font-weight: 700; color: var(--rk-text-strong); }
+`,
+    run(ctx) {
+      const funds = new Map();
+      const tip = el('div', { class: 'rk-group-funds', role: 'tooltip' });
+      let current = null;
+      const owned = Rk.me().then(me => (me ? groupsOf(me.id) : null)).then(groups => new Set((groups || []).filter(group => group.rank === 255).map(group => group.id)));
+      const fundsOf = id => {
+        const hit = funds.get(id);
+        if (hit && Date.now() - hit.time < 180000) return hit.promise;
+        const promise = safe(Rk.api.get(`https://economy.roblox.com/v1/groups/${id}/currency`)).then(json => (json && Number.isSafeInteger(json.robux) && json.robux >= 0 ? json.robux : null));
+        funds.set(id, { time: Date.now(), promise });
+        return promise;
+      };
+      const hide = () => {
+        current = null;
+        tip.classList.remove('rk-group-funds-open');
+      };
+      Rk.domReady.then(() => document.body.append(tip));
+      document.addEventListener('mouseover', async event => {
+        if (!Rk.isEnabled(ctx.id) || !(event.target instanceof Element)) return;
+        const link = event.target.closest('a[href*="/communities/"], a[href*="/groups/"]');
+        if (!link || link === current) return;
+        if (link.closest('.rk-group-funds')) return;
+        const id = Rk.idFrom(link.getAttribute('href'), 'group');
+        if (!id || !(await owned).has(id)) return;
+        current = link;
+        const robux = await fundsOf(id);
+        if (current !== link || robux === null) return;
+        tip.replaceChildren(el('span', { class: 'rk-muted' }, 'Funds'), ui.robux(robux));
+        const rect = link.getBoundingClientRect();
+        tip.style.left = `${Math.round(rect.left + window.scrollX)}px`;
+        tip.style.top = `${Math.round(rect.bottom + window.scrollY + 6)}px`;
+        tip.classList.add('rk-group-funds-open');
+      });
+      document.addEventListener('mouseout', event => {
+        if (!current || !(event.target instanceof Element)) return;
+        const next = event.relatedTarget;
+        if (next instanceof Node && current.contains(next)) return;
+        if (current.contains(event.target)) hide();
+      });
+      Rk.onSettings(() => {
+        if (!Rk.isEnabled(ctx.id)) hide();
+      });
     }
   });
 
