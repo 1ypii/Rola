@@ -561,6 +561,24 @@
   });
 
   Rk.feature({
+    id: 'games.adCredits',
+    category: 'games',
+    name: 'Ad credit balance',
+    description: 'Shows how much ad credit you have left in Ads Manager on experiences you own.',
+    default: false,
+    pages: GAME,
+    css: headCss,
+    async run() {
+      if (!(await isCreator())) return;
+      const json = await safe(Rk.api.get('https://apis.roblox.com/ads-management-api/v1/adCreditBalance', { cache: 60000 }));
+      const micro = json && Number(json.ad_credit_balance_in_micro);
+      if (!Number.isFinite(micro) || micro < 0) return;
+      const balance = (micro / 1e6).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      addTool(ui.button(`Ad credit ${balance}`, { icon: 'external', href: 'https://create.roblox.com/advertise/billing/paymentsettings', target: '_blank', title: 'Open payment settings in Ads Manager' }), 5);
+    }
+  });
+
+  Rk.feature({
     id: 'games.rootPlaceBanner',
     category: 'games',
     name: 'Main experience banner',
