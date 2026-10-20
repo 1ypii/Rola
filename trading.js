@@ -1296,6 +1296,142 @@
     }
   });
 
+  const tradePartner = () => {
+    const match = /^(?:\/[a-z]{2}(?:-[a-z]{2,4})?)?\/users\/(\d+)\/trade\/?$/i.exec(location.pathname);
+    return match ? Number(match[1]) : null;
+  };
+
+  const serialOf = card => {
+    const node = card.querySelector('.limited-number, .serial-number, [class*="serial"]');
+    const match = node && /#?\s*(\d+)/.exec(node.textContent);
+    return match ? Number(match[1]) : null;
+  };
+
+  const cardAssetId = card => {
+    const link = card.querySelector('a[href*="/catalog/"]');
+    return link ? Rk.idFrom(link.getAttribute('href'), 'asset') : null;
+  };
+
+  const changeOf = (node, limit) => new Promise(resolve => {
+    let done = false;
+    const finish = changed => {
+      if (done) return;
+      done = true;
+      watcher.disconnect();
+      clearTimeout(timer);
+      resolve(changed);
+    };
+    const watcher = new MutationObserver(() => finish(true));
+    watcher.observe(node, { childList: true, subtree: true, characterData: true });
+    const timer = setTimeout(() => finish(false), limit);
+  });
+
+  const setInputValue = (input, value) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, String(value));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  Rk.feature({
+    id: 'trading.repeatLastTrade',
+    category: 'trading',
+    name: 'Use last trade',
+    description: 'Adds a button to the trade window that puts the items from the last trade you sent back in. It never sends the trade for you.',
+    default: false,
+    css: `
+      .rk-trading-repeat { display: flex; justify-content: flex-end; margin: 0 0 12px; }
+    `,
+    async run(ctx) {
+      const partner = tradePartner();
+      if (!partner) return;
+      const offerBoxes = root => [...root.querySelectorAll('.trade-request-window-offer')];
+      const inventoryPanels = root => {
+        const offers = offerBoxes(root);
+        const panels = [...root.querySelectorAll('.inventory-panel-holder, .trade-inventory-panel, [class*="inventory-panel"]')]
+          .filter(panel => !offers.some(offer => offer.contains(panel) || panel.contains(offer)))
+          .filter((panel, index, list) => !list.some((other, otherIndex) => otherIndex !== index && other.contains(panel)));
+        return panels;
+      };
+      const lastSent = async () => {
+        const list = await Rk.api.get('https://trades.roblox.com/v1/trades/outbound?limit=10&sortOrder=Desc');
+        const latest = list && Array.isArray(list.data) ? list.data.find(trade => trade && Rk.isId(trade.id)) : null;
+        if (!latest) return null;
+        return Rk.api.get(`https://trades.roblox.com/v1/trades/${latest.id}`);
+      };
+      const inOffer = (offer, asset) => offer && [...offer.querySelectorAll(CARD)].some(card => cardAssetId(card) === asset.assetId && (!asset.serialNumber || serialOf(card) === asset.serialNumber));
+      const findCard = panel => asset => [...panel.querySelectorAll(CARD)].find(card => !card.closest('.trade-request-window-offer') && cardAssetId(card) === asset.assetId && (!asset.serialNumber || serialOf(card) === asset.serialNumber));
+      const nextPage = panel => panel.querySelector('.pager-next:not(.disabled) button, .pager-next:not(.disabled) a, button[aria-label="Next"]:not([disabled]), .btn-generic-right-sm:not([disabled])');
+      const pick = async (panel, offer, asset) => {
+        if (inOffer(offer, asset)) return true;
+        const find = findCard(panel);
+        for (let page = 0; page < 20; page += 1) {
+          const card = find(asset);
+          if (card) {
+            const target = card.querySelector('.item-card-thumb-container, .item-card-link, .item-card-thumb') || card;
+            const waiting = changeOf(offer || card, 1500);
+            target.click();
+            await waiting;
+            return inOffer(offer, asset) || !offer;
+          }
+          const next = nextPage(panel);
+          if (!next) return false;
+          const waiting = changeOf(panel, 3000);
+          next.click();
+          if (!(await waiting)) return false;
+        }
+        return false;
+      };
+      const fill = async button => {
+        button.disabled = true;
+        try {
+          const [trade, me] = await Promise.all([lastSent(), Rk.me()]);
+          const offers = trade && Array.isArray(trade.offers) ? trade.offers : [];
+          if (!me || offers.length < 2) {
+            ui.toast('No sent trade to copy', { tone: 'warning' });
+            return;
+          }
+          const mine = offers.find(offer => offer && offer.user && offer.user.id === me.id);
+          const theirs = offers.find(offer => offer !== mine);
+          const samePartner = Boolean(theirs && theirs.user && theirs.user.id === partner);
+          const root = document.querySelector('.trade-request-window') || document;
+          const boxes = offerBoxes(root);
+          const panels = inventoryPanels(root);
+          const sides = [[mine, boxes[0], panels[0]]];
+          if (samePartner) sides.push([theirs, boxes[1], panels[1]]);
+          let added = 0;
+          let skipped = 0;
+          for (const [offer, box, panel] of sides) {
+            const assets = offer && Array.isArray(offer.userAssets) ? offer.userAssets.filter(asset => asset && Rk.isId(asset.assetId)) : [];
+            for (const asset of assets) {
+              if (panel && await pick(panel, box, asset)) added += 1;
+              else skipped += 1;
+            }
+            const robux = offer ? Number(offer.robux) : 0;
+            const input = box && box.querySelector('input[type="text"], input[type="number"], input:not([type])');
+            if (input && Number.isFinite(robux) && robux > 0) setInputValue(input, robux);
+          }
+          const notes = [`Added ${fmt.plural(added, 'item')}`];
+          if (skipped) notes.push(`${skipped} not found or no longer owned`);
+          if (!samePartner) notes.push('last trade was with someone else, so only your side was added');
+          ui.toast(notes.join(', '), { tone: skipped || !samePartner ? 'warning' : 'success', duration: 6000 });
+        } catch {
+          ui.toast('Could not load your last trade', { tone: 'danger' });
+        } finally {
+          button.disabled = false;
+        }
+      };
+      const bar = el('div', { class: 'rk-trading-repeat' });
+      const button = ui.button('Use last trade', { variant: 'secondary', icon: 'refresh', title: 'Put the items from the last trade you sent back in', onClick: () => fill(button) });
+      bar.append(button);
+      Rk.onSettings(() => bar.classList.toggle('rk-hidden', !Rk.isEnabled(ctx.id)));
+      Rk.observe('.trade-request-window', windowNode => {
+        if (bar.isConnected) return;
+        windowNode.prepend(bar);
+      });
+    }
+  });
+
   Rk.feature({
     id: 'trading.tradeExport',
     category: 'trading',

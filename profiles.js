@@ -1390,8 +1390,12 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
     id: 'profiles.fakeVerified',
     category: 'profiles',
     name: 'Verified badge on you',
-    description: 'Shows a verified badge next to your name on your profile. Only you can see it.',
+    description: 'Shows a verified badge next to your name on your profile, in the sidebar and in the top bar, in any color. Only you can see it.',
     default: false,
+    options: [
+      { key: 'color', label: 'Badge color', type: 'color', default: '#0066ff' }
+    ],
+    css: ctx => `.rk-self-badge { --rk-verified: ${ctx.option('color')}; flex: none; margin-left: 4px; vertical-align: middle; }`,
     async run() {
       const me = await Rk.me();
       const display = me ? String(me.displayName || me.name).trim() : '';
@@ -1400,6 +1404,21 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       const displays = [display, custom('displayName')].filter(Boolean);
       const usernames = [me.name, custom('username')].filter(Boolean);
       const tags = 'h1, h2, h3, h4, span, div, p, a';
+      const selfBadge = size => {
+        const badge = ui.verified({ size });
+        badge.classList.add('rk-self-badge');
+        return badge;
+      };
+      const mine = text => displays.includes(text) || usernames.includes(text.replace(/^@/, ''));
+      Rk.observe('.age-bracket-label-username', node => {
+        if (!mine(node.textContent.trim()) || (node.parentElement && node.parentElement.querySelector(':scope > .rk-self-badge'))) return;
+        node.after(selfBadge(16));
+      });
+      Rk.observe(':is(#left-navigation-container, #navigation) a[href*="/users/"]', link => {
+        if (link.querySelector('.rk-self-badge')) return;
+        const name = [...link.querySelectorAll('span, div, p')].find(node => !node.firstElementChild && mine(node.textContent.trim()));
+        if (name) name.after(selfBadge(14));
+      });
       const add = node => {
         if (node.hasAttribute('data-rk-self-verified')) return;
         if (node.parentElement && node.parentElement.querySelector('[class*="verified" i]:not([class*="rk-verified"]), [data-testid*="verified" i]')) return;
@@ -1407,8 +1426,8 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         const size = Math.round(Math.min(28, Math.max(14, (parseFloat(style.fontSize) || 16) * 0.8)));
         const beside = style.display.startsWith('inline') || /flex|grid/.test(node.parentElement ? getComputedStyle(node.parentElement).display : '');
         node.setAttribute('data-rk-self-verified', '');
-        if (beside) node.after(ui.verified({ size }));
-        else node.append(ui.verified({ size }));
+        if (beside) node.after(selfBadge(size));
+        else node.append(selfBadge(size));
       };
       const page = Rk.page();
       if (page.type === 'profile' && page.id === me.id) {
@@ -1424,7 +1443,7 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
               const title = header.querySelector('#profile-header-title-container-name');
               if (title && displays.includes(title.textContent.trim())) {
                 if (title.parentElement.querySelector('[class*="verified" i]')) continue;
-                const badge = ui.verified();
+                const badge = selfBadge(24);
                 badge.style.cssText = 'width: var(--icon-size-large, 24px); height: var(--icon-size-large, 24px); margin: 0;';
                 const group = title.nextElementSibling && title.nextElementSibling.classList.contains('shrink-0') ? title.nextElementSibling : null;
                 title.setAttribute('data-rk-self-verified', '');
@@ -1832,6 +1851,129 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       } });
       button.classList.add('rk-friends-export');
       place(friendsHost(), button, 5);
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.joinCard',
+    category: 'profiles',
+    name: 'Join card on profiles',
+    description: 'When someone is in an experience you can see, shows a card with that experience and a Play button that joins their server, at the bottom of their profile.',
+    default: false,
+    pages: PROFILE,
+    css: `
+.rk-join-title { margin: 0 0 10px; font-size: 20px; font-weight: 700; color: var(--rk-text-strong); }
+.rk-join-card { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--rk-border); border-radius: 12px; background: var(--rk-surface); }
+.rk-join-card .rk-thumb { flex: none; border-radius: 8px; }
+.rk-join-name { flex: 1; min-width: 0; overflow: hidden; font-size: 16px; font-weight: 600; color: var(--rk-text-strong) !important; white-space: nowrap; text-overflow: ellipsis; text-decoration: none !important; }
+.rk-join-name:hover { text-decoration: underline !important; }
+.rk-join-play { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 20px; border: 0; border-radius: 8px; background: #e2531a; color: #ffffff; font-family: var(--rk-font); font-size: 16px; font-weight: 700; cursor: pointer; transition: filter var(--rk-fast) ease; }
+.rk-join-play:hover { filter: brightness(1.1); }
+.rk-join-section { margin-top: 24px; }
+`,
+    async run() {
+      const id = profileId();
+      const [me, user] = await Promise.all([Rk.me(), profileUser()]);
+      if (!id || !user || (me && me.id === id)) return;
+      const entry = (await presenceOf([id])).get(id);
+      const placeId = entry && Number(entry.placeId || entry.rootPlaceId);
+      if (presenceType(entry) !== 2 || !Rk.isId(placeId)) return;
+      const universeId = Rk.isId(Number(entry.universeId)) ? Number(entry.universeId) : await safe(Rk.api.universeId(placeId));
+      const name = typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : 'Experience';
+      const jobId = typeof entry.gameId === 'string' ? entry.gameId : null;
+      const play = el('button', { type: 'button', class: 'rk-join-play' }, icon('play', 16), 'Play');
+      play.addEventListener('click', () => {
+        if (jobId) Rk.launch.server(placeId, jobId);
+        else Rk.launch.follow(id);
+      });
+      const card = el('div', { class: 'rk-join-card' },
+        ui.thumb(universeId ? Rk.thumb('GameIcon', universeId, '150x150') : Promise.resolve(null), { size: 56, alt: name }),
+        el('a', { class: 'rk-join-name', href: `/games/${placeId}`, title: name }, name),
+        play
+      );
+      addSection('profile', el('div', { class: 'rk-join-section' }, el('h2', { class: 'rk-join-title' }, `Join ${user.displayName || user.name}`), card), 99);
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.terminatedView',
+    category: 'profiles',
+    name: 'View terminated accounts',
+    description: 'When you open a banned account, shows what is still public about it: names, join date, description, past usernames, counts and communities.',
+    default: false,
+    css: `
+.rk-terminated { max-width: 970px; margin: 24px auto; padding: 0 12px; }
+.rk-terminated-head { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+.rk-terminated-face { flex: none; display: flex; align-items: center; justify-content: center; width: 110px; height: 110px; border-radius: 50%; background: var(--rk-surface); color: var(--rk-muted); overflow: hidden; }
+.rk-terminated-name { margin: 0; font-size: 28px; font-weight: 700; color: var(--rk-text-strong); }
+.rk-terminated-user { font-size: 15px; color: var(--rk-muted); }
+.rk-terminated-banned { color: var(--rk-danger); font-weight: 700; }
+.rk-terminated-desc { margin: 0 0 18px; white-space: pre-wrap; word-break: break-word; color: var(--rk-text); }
+.rk-terminated-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rk-terminated-chip { padding: 4px 10px; border-radius: 999px; background: var(--rk-shift); font-size: 13px; color: var(--rk-text-strong); }
+.rk-terminated-groups { display: grid; gap: 8px; }
+.rk-terminated-group { display: flex; align-items: center; gap: 10px; color: var(--rk-text) !important; text-decoration: none !important; }
+`,
+    async run() {
+      document.addEventListener('click', event => {
+        const link = event.target instanceof Element ? event.target.closest('a[href*="/users/"]') : null;
+        const match = link && /\/users\/(\d+)\/profile/.exec(link.getAttribute('href') || '');
+        if (!match) return;
+        try {
+          sessionStorage.setItem('rk-last-profile', JSON.stringify({ id: Number(match[1]), at: Date.now() }));
+        } catch {}
+      }, true);
+      const lastClicked = () => {
+        try {
+          const saved = JSON.parse(sessionStorage.getItem('rk-last-profile') || 'null');
+          return saved && Rk.isId(saved.id) && Date.now() - saved.at < 30000 ? saved.id : null;
+        } catch {
+          return null;
+        }
+      };
+      const errorPage = /\/request-error/i.test(location.pathname);
+      const asked = Number(new URLSearchParams(location.search).get('rk-user'));
+      const id = Rk.page().type === 'profile' ? profileId() : errorPage ? (Rk.isId(asked) ? asked : lastClicked()) : null;
+      if (!id) return;
+      const user = await safe(Rk.api.get(`https://users.roblox.com/v1/users/${id}`));
+      if (!user || user.isBanned !== true) return;
+      const count = kind => safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/${kind}/count`)).then(json => (json && Number.isSafeInteger(json.count) ? json.count : null));
+      const [history, groups, friends, followers, following, face] = await Promise.all([
+        safe(Rk.api.paged(`https://users.roblox.com/v1/users/${id}/username-history?sortOrder=Desc`, { max: 100, limit: 100 })),
+        safe(Rk.api.get(`https://groups.roblox.com/v2/users/${id}/groups/roles`)),
+        count('friends'),
+        count('followers'),
+        count('followings'),
+        safe(Rk.thumb('AvatarHeadShot', id, '150x150'))
+      ]);
+      const created = user.created ? new Date(user.created) : null;
+      const pastNames = (Array.isArray(history) ? history : []).map(entry => entry && entry.name).filter(name => typeof name === 'string' && name);
+      const groupList = groups && Array.isArray(groups.data) ? groups.data.filter(entry => entry && entry.group && Rk.isId(entry.group.id)) : [];
+      const stats = [
+        ['User ID', String(id)],
+        ['Joined', created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown'],
+        ['Friends', friends === null ? 'Hidden' : fmt.num(friends)],
+        ['Followers', followers === null ? 'Hidden' : fmt.num(followers)],
+        ['Following', following === null ? 'Hidden' : fmt.num(following)]
+      ];
+      const content = el('div', null,
+        el('div', { class: 'rk-terminated-head' },
+          el('div', { class: 'rk-terminated-face' }, face ? ui.thumb(Promise.resolve(face), { size: 110, round: true, alt: user.name }) : icon('user', 44)),
+          el('div', null,
+            el('h1', { class: 'rk-terminated-name' }, String(user.displayName || user.name)),
+            el('div', { class: 'rk-terminated-user' }, `@${user.name} · `, el('span', { class: 'rk-terminated-banned' }, 'Terminated'))
+          )
+        ),
+        typeof user.description === 'string' && user.description.trim() ? el('p', { class: 'rk-terminated-desc' }, user.description.trim()) : null,
+        ui.stats(stats.map(([label, value]) => ui.stat(label, value))),
+        pastNames.length ? ui.section(`Past usernames (${pastNames.length})`, el('div', { class: 'rk-terminated-chips' }, pastNames.map(name => el('span', { class: 'rk-terminated-chip' }, name)))) : null,
+        groupList.length ? ui.section(`Communities (${groupList.length})`, el('div', { class: 'rk-terminated-groups' }, groupList.slice(0, 50).map(entry => el('a', { class: 'rk-terminated-group', href: `/communities/${entry.group.id}` },
+          ui.thumb(Rk.thumb('GroupIcon', entry.group.id, '150x150'), { size: 36, alt: '' }),
+          el('span', null, String(entry.group.name || 'Community'), entry.role && entry.role.name ? el('span', { class: 'rk-muted' }, ` · ${entry.role.name}`) : null)
+        )))) : null
+      );
+      const section = el('div', { class: 'rk-terminated' }, content);
+      Rk.mount(['#content', '.content', 'main', 'body'], section, { position: 'append' });
     }
   });
 

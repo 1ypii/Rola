@@ -514,6 +514,96 @@
     )));
   };
 
+  const watchedIds = () => {
+    const saved = Rk.store.get('tools.terminationWatch', []);
+    return Array.isArray(saved) ? [...new Set(saved.map(Number).filter(id => Rk.isId(id)))].slice(0, 100) : [];
+  };
+
+  let termsWindow = null;
+  const openTerminations = () => {
+    if (termsWindow) {
+      termsWindow.close();
+      return;
+    }
+    const list = el('div', { class: 'rk-tools-terms-list' }, ui.spinner());
+    const history = el('div', { class: 'rk-tools-terms-list' });
+    const field = ui.input({ placeholder: 'Username or user id', maxLength: 40, onEnter: () => add() });
+    const render = async () => {
+      const ids = watchedIds();
+      const status = await Rk.bg('terms').catch(() => null);
+      const users = status && status.users && typeof status.users === 'object' ? status.users : {};
+      const log = status && Array.isArray(status.log) ? status.log.filter(entry => entry && Rk.isId(entry.userId)) : [];
+      list.replaceChildren(...(ids.length ? ids.map(id => {
+        const info = users[id];
+        const banned = Boolean(info && info.banned);
+        const name = info ? clip(info.displayName, 60) || clip(info.name, 40) : `User ${id}`;
+        const remove = ui.button('', { variant: 'ghost', icon: 'trash', title: 'Remove from watchlist', onClick: () => {
+          Rk.store.set('tools.terminationWatch', watchedIds().filter(item => item !== id));
+          render();
+        } });
+        return ui.row(
+          [
+            banned ? el('span', { class: 'rk-tools-terms-gone' }, icon('user', 18)) : ui.thumb(Rk.thumb('AvatarHeadShot', id, '48x48', { circular: true }), { size: 36, round: true }),
+            el('div', { class: 'rk-tools-person' },
+              ui.link(`/users/${id}/profile`, name),
+              el('span', { class: 'rk-muted' }, [info && clip(info.name, 40) ? `@${clip(info.name, 40)}` : '', info && info.checked ? `checked ${fmt.ago(info.checked)}` : 'not checked yet'].filter(Boolean).join(' · '))
+            )
+          ],
+          [ui.pill(banned ? 'Terminated' : info ? 'Active' : 'Checking', banned ? 'danger' : info ? 'success' : 'neutral'), remove]
+        );
+      }) : [ui.empty('Add someone to start watching them')]));
+      history.replaceChildren(...(log.length ? log.slice(0, 30).map(entry => ui.row(
+        [el('div', { class: 'rk-tools-person' },
+          ui.link(`/users/${entry.userId}/profile`, clip(entry.displayName, 60) || `User ${entry.userId}`),
+          el('span', { class: 'rk-muted' }, entry.event === 'terminated' ? 'Terminated' : 'Came back')
+        )],
+        el('span', { class: 'rk-muted' }, fmt.ago(entry.time))
+      )) : [ui.empty('No terminations yet')]));
+    };
+    const add = async () => {
+      const text = field.value.trim();
+      if (!text) return;
+      let id = /^\d{1,20}$/.test(text) ? Number(text) : null;
+      if (!id) {
+        const json = await Rk.api.post('https://users.roblox.com/v1/usernames/users', { usernames: [text], excludeBannedUsers: false }).catch(() => null);
+        const user = json && Array.isArray(json.data) ? json.data.find(item => item && Rk.isId(item.id)) : null;
+        id = user ? user.id : null;
+      }
+      if (!Rk.isId(id)) {
+        ui.toast('Could not find that user', { tone: 'warning' });
+        return;
+      }
+      const ids = watchedIds();
+      if (ids.includes(id)) {
+        ui.toast('Already on your watchlist', { tone: 'warning' });
+        return;
+      }
+      if (ids.length >= 100) {
+        ui.toast('You can watch up to 100 users', { tone: 'warning' });
+        return;
+      }
+      Rk.store.set('tools.terminationWatch', [...ids, id]);
+      field.value = '';
+      await render();
+      setTimeout(() => Rk.bg('poll-now').then(render, () => {}), 600);
+    };
+    termsWindow = Rk.themedWindow({
+      title: 'Termination watchlist',
+      width: 560,
+      content: [
+        el('div', { class: 'rk-inline rk-tools-terms-add' }, field, ui.button('Add', { variant: 'primary', onClick: add })),
+        el('h3', { class: 'rk-tools-terms-heading' }, 'Watching'),
+        list,
+        el('h3', { class: 'rk-tools-terms-heading' }, 'History'),
+        history
+      ],
+      onClose: () => {
+        termsWindow = null;
+      }
+    });
+    render();
+  };
+
   const openDrops = async () => {
     const body = el('div', null, ui.spinner());
     const handle = toggleModal('drops', () => ({ title: 'Item drops', width: 520, content: body }));
@@ -777,6 +867,7 @@
     ['tools.achievements', 'Achievements', 'star', openAchievements, 'badges goals milestones value'],
     ['tools.unfriendAlerts', 'Unfriends', 'users', openUnfriends, 'removed friends unfriended'],
     ['tools.itemDrops', 'Item drops', 'bell', openDrops, 'new roblox items catalog released'],
+    ['tools.terminationWatch', 'Termination watchlist', 'eye', openTerminations, 'banned terminated deleted accounts watch'],
     ['tools.quickNotes', 'Quick notes', 'edit', toggleQuickNotes, 'notepad scratch'],
     ['tools.shortcutHelp', 'Keyboard shortcuts', 'keyboard', openShortcuts, 'hotkeys keys help']
   ];
@@ -1493,25 +1584,39 @@
     id: 'tools.streamerMode',
     category: 'tools',
     name: 'Streamer mode',
-    description: 'Blurs your Robux balance, age label and username until you hover them. Alt+S turns it on or off.',
+    description: 'Hides what you would not want on stream: your Robux, your name, and private info like your email, phone, sessions, IP addresses, age group and birthday. Alt+S turns it on or off.',
     default: false,
-    css: `
+    options: [
+      { key: 'privateInfo', label: 'Hide private info on account settings and IP addresses everywhere', type: 'toggle', default: true },
+      { key: 'blurName', label: 'Blur your name until you hover it', type: 'toggle', default: true },
+      { key: 'hideRobux', label: 'Show Hidden instead of your Robux', type: 'toggle', default: true }
+    ],
+    css: ctx => `
+      ${ctx.option('hideRobux') ? `
       #nav-robux-amount,
-      #nav-robux-balance,
-      .age-bracket-label,
+      #nav-robux-balance {
+        font-size: 0 !important;
+      }
+      #nav-robux-amount::after,
+      #nav-robux-balance::after {
+        content: 'Hidden';
+        font-size: 16px;
+      }` : ''}
+      ${ctx.option('blurName') ? `
       .rk-tools-streamer {
         filter: blur(6px) !important;
         transition: filter var(--rk-fast) ease;
       }
-      #navbar-robux:hover #nav-robux-amount,
-      #nav-robux-amount:hover,
-      #nav-robux-balance:hover,
-      .age-bracket-label:hover,
       .rk-tools-streamer:hover {
         filter: none !important;
-      }
+      }` : ''}
+      ${ctx.option('privateInfo') ? `
+      .age-bracket-label,
+      .rk-tools-private {
+        display: none !important;
+      }` : ''}
     `,
-    run() {
+    run(ctx) {
       Rk.me().then(user => {
         if (!user) return;
         const names = new Set([user.name, user.displayName, user.name ? `@${user.name}` : ''].filter(Boolean).map(name => name.toLowerCase()));
@@ -1523,6 +1628,112 @@
             return;
           }
         }, { root: container }));
+      });
+      const notice = 'Rola streamer mode';
+      const ipPattern = /\b\d{1,3}(?:\.\d{1,3}){3}\b|\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}\b/gi;
+      const replaceLabels = /^(email|email address|phone|phone number|account location|location)$/i;
+      const hideLabels = /^(birthday|date of birth|age group|previous usernames?|past usernames?)$/i;
+      const sessionHeadings = /^(where you('|’)re logged in|sessions|active sessions|logged in devices|devices)$/i;
+      const masked = new Map();
+      const hidden = new Set();
+      let queued = false;
+      const active = () => Rk.isEnabled(ctx.id) && ctx.option('privateInfo');
+      const accountPage = () => /^\/my\/(account|settings)/i.test(location.pathname);
+      const setText = (text, value) => {
+        if (text.nodeValue === value) return;
+        masked.set(text, { original: text.nodeValue, value });
+        text.nodeValue = value;
+      };
+      const textNodes = root => {
+        const nodes = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode: node => (node.parentElement && !node.parentElement.closest('script, style, textarea, [class^="rk-"], [class*=" rk-"]') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT)
+        });
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node);
+        return nodes;
+      };
+      const rowOf = label => {
+        const own = label.textContent.trim();
+        let row = label;
+        while (row.parentElement && row.parentElement !== document.body && row.textContent.trim() === own) row = row.parentElement;
+        return row;
+      };
+      const maskRow = (row, label) => {
+        let first = true;
+        for (const text of textNodes(row)) {
+          if (label.contains(text) || !text.nodeValue.trim() || text.parentElement.closest('button, [role="button"], a')) continue;
+          setText(text, first ? notice : '');
+          first = false;
+        }
+      };
+      const scan = root => {
+        for (const text of textNodes(root)) {
+          ipPattern.lastIndex = 0;
+          if (ipPattern.test(text.nodeValue)) setText(text, text.nodeValue.replace(ipPattern, notice));
+        }
+        if (!accountPage()) return;
+        for (const text of textNodes(root)) {
+          const value = text.nodeValue.trim();
+          if (!value || value.length > 40) continue;
+          const label = text.parentElement;
+          if (hideLabels.test(value)) {
+            const row = rowOf(label);
+            row.classList.add('rk-tools-private');
+            hidden.add(row);
+          } else if (replaceLabels.test(value)) {
+            maskRow(rowOf(label), label);
+          } else if (sessionHeadings.test(value)) {
+            maskRow(rowOf(label), label);
+          }
+        }
+      };
+      const restore = () => {
+        for (const [text, { original, value }] of masked) {
+          if (text.nodeValue === value) text.nodeValue = original;
+        }
+        masked.clear();
+        for (const row of hidden) row.classList.remove('rk-tools-private');
+        hidden.clear();
+      };
+      const pending = new Set();
+      const flush = () => {
+        queued = false;
+        if (!active()) {
+          pending.clear();
+          return;
+        }
+        const roots = accountPage() ? [document.body] : [...pending];
+        pending.clear();
+        for (const root of roots) if (root.isConnected) scan(root);
+      };
+      const schedule = root => {
+        pending.add(root);
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(flush);
+      };
+      Rk.waitFor('body').then(body => {
+        new MutationObserver(records => {
+          if (!active()) return;
+          for (const record of records) {
+            if (record.type === 'characterData') {
+              const text = record.target;
+              const entry = masked.get(text);
+              if (entry && text.nodeValue === entry.value) continue;
+              if (text.parentElement) schedule(text.parentElement);
+            } else {
+              for (const node of record.addedNodes) {
+                if (node.nodeType === 1) schedule(node);
+                else if (node.nodeType === 3 && node.parentElement) schedule(node.parentElement);
+              }
+            }
+          }
+        }).observe(body, { childList: true, characterData: true, subtree: true });
+        schedule(body);
+      });
+      Rk.onSettings(() => {
+        if (active()) schedule(document.body);
+        else restore();
       });
     }
   });
@@ -1554,7 +1765,7 @@
     description: 'Shows your own number as your Robux balance in the header. Only you can see it, your real balance does not change.',
     default: false,
     options: [
-      { key: 'amount', label: 'Robux', type: 'number', min: 0, max: 999999999999, step: 1, default: 1000 }
+      { key: 'amount', label: 'Robux', type: 'number', min: -999999999999, max: 999999999999, step: 1, default: 1000 }
     ],
     async run(ctx) {
       const me = await Rk.me();
@@ -1563,6 +1774,7 @@
       if (real === null) return;
       const full = new Intl.NumberFormat();
       const short = value => {
+        if (value < 0) return `-${short(-value)}`;
         if (value < 10000) return full.format(value);
         const text = String(value);
         const suffix = ['', 'K+', 'M+', 'B+', 'T+'][Math.min(Math.floor(Math.log(value) / Math.log(1000)), 4)];
@@ -1752,6 +1964,26 @@
       sync();
       Rk.onSettings(sync);
     }
+  });
+
+  Rk.feature({
+    id: 'tools.terminationWatch',
+    category: 'tools',
+    name: 'Termination watchlist',
+    description: 'Watch Roblox accounts and get a notification with your own sound when one gets terminated or comes back. Open the list from quick search.',
+    default: false,
+    options: [
+      { key: 'assetId', label: 'Sound audio asset id', type: 'text', maxLength: 20, placeholder: 'Default sound', default: '' }
+    ],
+    css: `
+      .rk-tools-terms-add { display: flex; gap: 8px; margin: 4px 0 8px; }
+      .rk-tools-terms-add .rk-input { flex: 1; }
+      .rk-tools-terms-heading { margin: 16px 0 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--rk-muted); }
+      .rk-tools-terms-list .rk-row-side { display: flex; align-items: center; gap: 6px; }
+      .rk-tools-terms-gone { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--rk-shift); color: var(--rk-muted); }
+      .rk-tools-person { display: flex; flex-direction: column; min-width: 0; }
+    `,
+    run: pollNow
   });
 
   Rk.feature({

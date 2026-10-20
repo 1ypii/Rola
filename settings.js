@@ -849,6 +849,48 @@
     if (panel) applyPanelImage(panel.frame);
   });
 
+  Rk.themedWindow = ({ title, content, width = 560, onClose }) => {
+    theme = storedTheme();
+    const body = el('div', { class: 'rk-settings-list' }, content);
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('keydown', onKey, true);
+      backdrop.classList.remove('rk-modal-open');
+      backdrop.addEventListener('transitionend', () => backdrop.remove(), { once: true });
+      setTimeout(() => backdrop.remove(), 400);
+      if (onClose) onClose();
+    };
+    const onKey = event => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      close();
+    };
+    const dialog = el('div', { class: 'rk-settings', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, tabindex: '-1', style: { gridTemplateColumns: '1fr', width: `min(${width}px, calc(100vw - 32px))`, height: 'min(620px, calc(100vh - 32px))' } },
+      el('div', { class: 'rk-settings-titlebar' },
+        el('span', null, 'Rola'),
+        el('button', { type: 'button', class: 'rk-settings-titlebar-close', 'aria-label': 'Close', onclick: close }, icon('close', 16))
+      ),
+      el('section', { class: 'rk-settings-main' },
+        el('div', { class: 'rk-settings-head' },
+          el('h2', { class: 'rk-settings-title' }, title),
+          el('div', { class: 'rk-settings-head-actions' }, ui.button('', { variant: 'ghost', size: 'md', icon: 'close', title: 'Close', onClick: close }))
+        ),
+        body
+      )
+    );
+    const frame = el('div', { class: 'rk-settings-frame' }, dialog);
+    styleFrame(frame);
+    const backdrop = el('div', { class: 'rk-modal-backdrop', onmousedown: event => {
+      if (event.target === backdrop) close();
+    } }, frame);
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(backdrop);
+    requestAnimationFrame(() => backdrop.classList.add('rk-modal-open'));
+    return { close, body };
+  };
+
   Rk.observe('ul.navbar-right', navbar => {
     if (navbar.querySelector('.rk-nav-settings')) return;
     const trigger = el('a', {
