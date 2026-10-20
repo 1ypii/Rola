@@ -25,7 +25,8 @@
     "alarms",
     "notifications",
     "downloads",
-    "offscreen"
+    "offscreen",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "https://*.roblox.com/*",

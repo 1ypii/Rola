@@ -503,6 +503,19 @@ const download = async ({ url, filename }) => {
   return true;
 };
 
+const imageData = async ({ url } = {}) => {
+  if (typeof url !== 'string') throw new Error('missing url');
+  const target = new URL(url);
+  if (target.protocol !== 'https:') throw new Error('only https images');
+  const response = await fetch(target.href, { credentials: 'omit' });
+  if (!response.ok) throw new Error(`image request failed ${response.status}`);
+  const type = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (!/^image\/(png|jpeg|gif|webp|avif)$/.test(type)) throw new Error('not an image');
+  const buffer = await response.arrayBuffer();
+  if (buffer.byteLength > 15 * 1024 * 1024) throw new Error('image too large');
+  return `data:${type};base64,${encodeBytes(buffer)}`;
+};
+
 const handlers = {
   values: () => loadValues(),
   notify: payload => {
@@ -511,6 +524,7 @@ const handlers = {
     return true;
   },
   download: payload => download(payload || {}),
+  'image-data': payload => imageData(payload || {}),
   sound: payload => playSound(payload).then(() => true),
   music: () => syncMusic(),
   unfriends: async () => {

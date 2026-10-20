@@ -170,6 +170,11 @@
     if (font) frame.style.setProperty('--rk-font', font);
   };
 
+  const styleFrame = (frame, preview) => {
+    applyTheme(frame, preview);
+    applyPanelImage(frame);
+  };
+
   const mascotUrl = () => {
     const custom = activeTheme();
     if (custom && custom.mascot) return custom.mascot;
@@ -222,7 +227,7 @@
     panel.themePicker.replaceChildren(...themeChoices().map(([value, label]) => el('option', { value }, label)));
     panel.themePicker.value = theme;
     panel.themeEdit.textContent = activeTheme() ? 'Edit theme' : 'New theme';
-    applyTheme(panel.frame);
+    styleFrame(panel.frame);
     panel.mascot.firstChild.src = mascotUrl();
   };
 
@@ -233,7 +238,7 @@
     const draft = { name: editing ? base.name : 'My theme', colors: { ...base.colors }, mascot: base.mascot, style: { ...base.style } };
     let saved = false;
     const preview = () => {
-      if (panel) applyTheme(panel.frame, draft);
+      if (panel) styleFrame(panel.frame, draft);
     };
     const nameField = ui.input({ value: draft.name, maxLength: 40, onInput: value => {
       draft.name = value;
@@ -375,7 +380,7 @@
         ui.button('Save', { variant: 'primary', size: 'md', onClick: () => store(false) })
       ].filter(Boolean),
       onClose: () => {
-        if (!saved && panel) applyTheme(panel.frame);
+        if (!saved && panel) styleFrame(panel.frame);
       }
     });
     preview();
@@ -434,6 +439,116 @@
     }
   };
 
+  const imageTypes = /^image\/(png|jpeg|gif|webp|avif)$/;
+
+  const imageControl = (entry, def) => {
+    const preview = el('span', { class: 'rk-image-preview rk-hidden' });
+    const status = el('span', { class: 'rk-image-status' });
+    const link = ui.input({ placeholder: 'Image or gif link', maxLength: 2000 });
+    const picker = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp,image/avif', style: { display: 'none' } });
+    const remove = ui.button('Remove', { variant: 'ghost', onClick: async () => {
+      await Rk.images.remove(entry.id, def.key);
+      withLocalChange(() => Rk.setOption(entry.id, def.key, ''));
+      showPreview();
+    } });
+    const showPreview = async () => {
+      const data = Rk.option(entry.id, def.key) ? await Rk.images.get(entry.id, def.key) : null;
+      preview.style.backgroundImage = data ? `url("${data}")` : '';
+      preview.classList.toggle('rk-hidden', !data);
+      remove.classList.toggle('rk-hidden', !data);
+    };
+    const store = async data => {
+      try {
+        await Rk.images.set(entry.id, def.key, data);
+      } catch {
+        ui.toast('Could not save that image', { tone: 'danger' });
+        return;
+      }
+      withLocalChange(() => Rk.setOption(entry.id, def.key, String(Date.now())));
+      showPreview();
+      ui.toast('Image saved', { tone: 'success' });
+    };
+    const useFile = file => {
+      if (!file || !imageTypes.test(file.type)) {
+        ui.toast('That has to be a png, jpg, gif or webp image', { tone: 'warning' });
+        return;
+      }
+      if (file.size > 15 * 1024 * 1024) {
+        ui.toast('That image is over 15 MB', { tone: 'warning' });
+        return;
+      }
+      const reader = new FileReader();
+      reader.addEventListener('load', () => store(String(reader.result)), { once: true });
+      reader.readAsDataURL(file);
+    };
+    const useLink = async text => {
+      const target = directImageLink(String(text || '').trim());
+      if (!target) {
+        ui.toast('That has to be an https image link', { tone: 'warning' });
+        return;
+      }
+      status.textContent = 'Loading';
+      const data = await Rk.bg('image-data', { url: target }).catch(() => null);
+      status.textContent = '';
+      if (typeof data !== 'string' || !data.startsWith('data:image/')) {
+        ui.toast('That image could not load, right click the image and use copy image address, or download it and drop the file in', { tone: 'danger', duration: 7000 });
+        return;
+      }
+      link.value = '';
+      store(data);
+    };
+    link.addEventListener('keydown', event => {
+      if (event.key === 'Enter') useLink(link.value);
+    });
+    picker.addEventListener('change', () => {
+      useFile(picker.files && picker.files[0]);
+      picker.value = '';
+    });
+    const box = el('div', { class: 'rk-image-option' },
+      preview,
+      link,
+      ui.button('Use link', { variant: 'ghost', onClick: () => useLink(link.value) }),
+      ui.button('Choose file', { variant: 'ghost', onClick: () => picker.click() }),
+      remove,
+      status,
+      picker
+    );
+    box.addEventListener('dragover', event => {
+      event.preventDefault();
+      box.classList.add('rk-image-drop');
+    });
+    box.addEventListener('dragleave', () => box.classList.remove('rk-image-drop'));
+    box.addEventListener('drop', event => {
+      event.preventDefault();
+      box.classList.remove('rk-image-drop');
+      const file = event.dataTransfer.files && event.dataTransfer.files[0];
+      if (file) useFile(file);
+      else useLink(event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain'));
+    });
+    showPreview();
+    return box;
+  };
+
+  let panelImage = { token: null, data: null };
+
+  const applyPanelImage = async frame => {
+    const on = Rk.isEnabled('site.panelBackground');
+    const token = on ? Rk.option('site.panelBackground', 'image') : '';
+    if (token !== panelImage.token) {
+      const data = token ? await Rk.images.get('site.panelBackground', 'image') : null;
+      panelImage = { token, data };
+    }
+    const show = Boolean(on && panelImage.data);
+    frame.classList.toggle('rk-panel-image', show);
+    if (show) {
+      frame.style.setProperty('--rk-panel-bg', `url("${panelImage.data}")`);
+      frame.style.setProperty('--rk-panel-dim', `${Rk.option('site.panelBackground', 'dim')}%`);
+    } else {
+      frame.style.removeProperty('--rk-panel-bg');
+      frame.style.removeProperty('--rk-panel-dim');
+    }
+  };
+
   const optionControl = (entry, def) => {
     const value = Rk.option(entry.id, def.key);
     if (def.type === 'toggle') {
@@ -470,6 +585,7 @@
       field.addEventListener('change', save);
       return field;
     }
+    if (def.type === 'image') return imageControl(entry, def);
     if (def.type === 'color') {
       const field = el('input', { type: 'color', 'aria-label': def.label });
       field.value = value;
@@ -672,7 +788,7 @@
       main
     );
     const frame = el('div', { class: 'rk-settings-frame' }, dialog);
-    applyTheme(frame);
+    styleFrame(frame);
     for (const handle of [titlebar, head]) {
       handle.addEventListener('pointerdown', event => startDrag(dialog, event));
       handle.addEventListener('dblclick', event => {
@@ -727,6 +843,10 @@
     if (!panel || localChange) return;
     renderList({ keepScroll: true });
     updateCounts();
+  });
+
+  Rk.onSettings(() => {
+    if (panel) applyPanelImage(panel.frame);
   });
 
   Rk.observe('ul.navbar-right', navbar => {

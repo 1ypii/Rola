@@ -427,6 +427,7 @@ button.rk-profile-chip:active { transform: scale(0.97); }
     category: 'profiles',
     name: 'Mutual friends',
     description: 'Shows the friends you have in common with other users.',
+    default: false,
     pages: PROFILE,
     css: `${tilesCss}${nativeCss('friends', '.react-friends-carousel-container, .friends-carousel-0-friends')}`,
     run: replacing('friends', async () => {

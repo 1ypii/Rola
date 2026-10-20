@@ -2074,44 +2074,65 @@
     id: 'site.customBackground',
     category: 'site',
     name: 'Custom background image',
-    description: 'Uses an image link of your choice as the site background, with blur and dimming. Works with the dark theme.',
+    description: 'Puts your own image or gif behind the site. Paste a link, choose a file or drop one in, then pick the blur and dimming.',
     default: false,
     options: [
-      { key: 'url', label: 'Image link (https)', type: 'text', maxLength: 500, placeholder: 'https://', default: '' },
+      { key: 'image', label: 'Image or gif', type: 'image', default: '' },
       { key: 'blur', label: 'Blur', type: 'number', min: 0, max: 30, step: 1, default: 0 },
       { key: 'dim', label: 'Dim (percent)', type: 'number', min: 0, max: 90, step: 5, default: 40 }
     ],
     css: ctx => {
-      let target;
-      try {
-        target = new URL(ctx.option('url').trim());
-      } catch {
-        return '';
-      }
-      if (target.protocol !== 'https:') return '';
-      const source = target.href.replace(/["\\\n\r]/g, char => encodeURIComponent(char));
+      if (!ctx.option('image')) return '';
       const blur = Math.min(Math.max(Number(ctx.option('blur')) || 0, 0), 30);
       const dim = Math.min(Math.max(Number(ctx.option('dim')) || 0, 0), 90) / 100;
       return `
-        html body.dark-theme,
-        html body.dark-theme #wrap,
-        html body.dark-theme #container-main,
-        html body.dark-theme .container-main {
+        html:has(> body.rk-custom-bg) body,
+        html:has(> body.rk-custom-bg) #wrap,
+        html:has(> body.rk-custom-bg) #container-main,
+        html:has(> body.rk-custom-bg) .container-main {
           background: transparent !important;
         }
-        html body.dark-theme::before {
+        html body.rk-custom-bg::before {
           content: '';
           position: fixed;
           inset: ${-blur * 2}px;
           z-index: -1;
           pointer-events: none;
-          background-image: linear-gradient(rgba(0, 0, 0, ${dim}), rgba(0, 0, 0, ${dim})), url("${source}");
+          background-image: linear-gradient(rgba(0, 0, 0, ${dim}), rgba(0, 0, 0, ${dim})), var(--rk-custom-bg);
           background-size: cover;
           background-position: center;
           filter: ${blur ? `blur(${blur}px)` : 'none'};
         }
       `;
+    },
+    run(ctx) {
+      let token = null;
+      const apply = async () => {
+        const next = Rk.isEnabled(ctx.id) ? ctx.option('image') : '';
+        if (next === token) return;
+        token = next;
+        const data = next ? await Rk.images.get(ctx.id, 'image') : null;
+        if (token !== next) return;
+        const body = await Rk.waitFor('body');
+        if (data) document.documentElement.style.setProperty('--rk-custom-bg', `url("${data}")`);
+        else document.documentElement.style.removeProperty('--rk-custom-bg');
+        body.classList.toggle('rk-custom-bg', Boolean(data));
+      };
+      apply();
+      Rk.onSettings(apply);
     }
+  });
+
+  Rk.feature({
+    id: 'site.panelBackground',
+    category: 'site',
+    name: 'Settings window background',
+    description: 'Puts your own image or gif behind the Rola settings window. Paste a link, choose a file or drop one in.',
+    default: false,
+    options: [
+      { key: 'image', label: 'Image or gif', type: 'image', default: '' },
+      { key: 'dim', label: 'Dim (percent)', type: 'number', min: 0, max: 95, step: 5, default: 70 }
+    ]
   });
 
   const cursorSvg = (svg, x, y) => `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${x} ${y}`;

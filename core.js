@@ -79,6 +79,8 @@ const Rk = (() => {
         return typeof value === 'string' && value.length <= (def.maxLength || 200);
       case 'color':
         return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+      case 'image':
+        return typeof value === 'string' && value.length <= 40;
       default:
         return false;
     }
@@ -600,6 +602,16 @@ const Rk = (() => {
     thumbCache.set(key, promise);
     if (thumbCache.size > 3000) thumbCache.delete(thumbCache.keys().next().value);
     return promise;
+  };
+
+  const imageKey = (id, key) => `rk:image:${id}:${key}`;
+  const images = {
+    get: async (id, key) => {
+      const value = (await chrome.storage.local.get(imageKey(id, key)))[imageKey(id, key)];
+      return typeof value === 'string' && value.startsWith('data:image/') ? value : null;
+    },
+    set: (id, key, data) => chrome.storage.local.set({ [imageKey(id, key)]: data }),
+    remove: (id, key) => chrome.storage.local.remove(imageKey(id, key))
   };
 
   const bg = (type, payload) => new Promise((resolve, reject) => {
@@ -1296,6 +1308,7 @@ const Rk = (() => {
     thumbToken,
     values,
     bg,
+    images,
     launch,
     store: storeApi,
     fmt,
