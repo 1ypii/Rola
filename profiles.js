@@ -1917,7 +1917,12 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         const row = ui.section(`Best friends (${ids.length})`, el('div', { class: 'rk-friends-best' }, ids.map(userId => cardFor(userId, users, presence, 84))), { className: 'rk-home-best' });
         Rk.observe('.friends-carousel-container', carousel => {
           if (row.isConnected) return;
-          const block = carousel.parentElement && carousel.parentElement.querySelector(':scope > .container-header') ? carousel.parentElement : carousel;
+          let block = carousel;
+          for (let depth = 0; depth < 6 && block.parentElement && block.parentElement !== document.body; depth += 1) {
+            block = block.parentElement;
+            const heading = [...block.querySelectorAll('.container-header, h2, h3')].find(node => !carousel.contains(node));
+            if (heading) break;
+          }
           block.before(row);
         });
         return;
