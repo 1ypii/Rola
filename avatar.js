@@ -1087,7 +1087,10 @@
       if (!isCatalogKind(kind) || !Rk.isId(id)) return;
       const meta = await itemMeta(kind, id);
       if (meta && (meta.limited || meta.limitedU) && kind === 'asset') {
-        const data = await Rk.api.get(`https://economy.roblox.com/v1/assets/${id}/resale-data`, { cache: 60000 }).catch(() => null);
+        const details = await Rk.api.get(`https://economy.roblox.com/v2/assets/${id}/details`, { cache: 600000 }).catch(() => null);
+        const collectible = isObject(details) && typeof details.CollectibleItemId === 'string' && /^[0-9a-f-]{36}$/i.test(details.CollectibleItemId) ? details.CollectibleItemId : null;
+        const current = collectible ? await Rk.api.get(`https://apis.roblox.com/marketplace-sales/v1/item/${collectible}/resale-data`, { cache: 60000 }).catch(() => null) : null;
+        const data = isObject(current) && Array.isArray(current.priceDataPoints) ? current : await Rk.api.get(`https://economy.roblox.com/v1/assets/${id}/resale-data`, { cache: 60000 }).catch(() => null);
         const sales = (isObject(data) && Array.isArray(data.priceDataPoints) ? data.priceDataPoints : [])
           .map(point => [isObject(point) ? Date.parse(point.date) : NaN, isObject(point) ? Number(point.value) : NaN])
           .filter(([time, value]) => Number.isFinite(time) && Number.isFinite(value) && value > 0)

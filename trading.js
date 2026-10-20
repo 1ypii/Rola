@@ -72,7 +72,17 @@
     return limitedPromise;
   };
 
-  const resale = id => Rk.api.get(`https://economy.roblox.com/v1/assets/${id}/resale-data`, { cache: 60000 }).then(json => (json && typeof json === 'object' ? json : null), () => null);
+  const resale = async id => {
+    const [legacy, details] = await Promise.all([
+      Rk.api.get(`https://economy.roblox.com/v1/assets/${id}/resale-data`, { cache: 60000 }).catch(() => null),
+      Rk.api.get(`https://economy.roblox.com/v2/assets/${id}/details`, { cache: 600000 }).catch(() => null)
+    ]);
+    const base = legacy && typeof legacy === 'object' ? legacy : null;
+    const collectible = details && typeof details.CollectibleItemId === 'string' && /^[0-9a-f-]{36}$/i.test(details.CollectibleItemId) ? details.CollectibleItemId : null;
+    const current = collectible ? await Rk.api.get(`https://apis.roblox.com/marketplace-sales/v1/item/${collectible}/resale-data`, { cache: 60000 }).catch(() => null) : null;
+    if (!current || typeof current !== 'object' || !Array.isArray(current.priceDataPoints)) return base;
+    return { ...base, ...current, recentAveragePrice: Math.round(Number(current.recentAveragePrice) || 0) };
+  };
 
   const hosts = new Map();
   const slot = async order => {
