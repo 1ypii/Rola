@@ -519,6 +519,42 @@
     return Array.isArray(saved) ? [...new Set(saved.map(Number).filter(id => Rk.isId(id)))].slice(0, 100) : [];
   };
 
+  const watchedNames = () => {
+    const saved = Rk.store.get('tools.terminationNames', {});
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  };
+
+  let watchText = null;
+
+  const storeWatched = (ids, names) => {
+    Rk.store.set('tools.terminationWatch', ids);
+    Rk.store.set('tools.terminationNames', Object.fromEntries(ids.filter(id => typeof names[id] === 'string').map(id => [id, names[id]])));
+  };
+
+  const saveWatched = (ids, names) => {
+    storeWatched(ids, names);
+    watchText = ids.map(id => (typeof names[id] === 'string' ? names[id] : String(id))).join(', ').slice(0, 2000);
+    if (Rk.option('tools.terminationWatch', 'users') !== watchText) Rk.setOption('tools.terminationWatch', 'users', watchText);
+  };
+
+  const resolveWatched = async text => {
+    const tokens = [...new Set(text.split(/[\s,]+/).map(token => token.trim()).filter(Boolean))].slice(0, 100);
+    const ids = tokens.filter(token => /^\d{1,20}$/.test(token)).map(Number).filter(id => Rk.isId(id));
+    const usernames = tokens.filter(token => /^[A-Za-z0-9_]{3,20}$/.test(token) && !/^\d+$/.test(token));
+    const names = { ...watchedNames() };
+    if (usernames.length) {
+      const json = await Rk.api.post('https://users.roblox.com/v1/usernames/users', { usernames, excludeBannedUsers: false }).catch(() => null);
+      const found = json && Array.isArray(json.data) ? json.data.filter(user => user && Rk.isId(user.id) && typeof user.name === 'string') : [];
+      for (const user of found) {
+        ids.push(user.id);
+        names[user.id] = user.name;
+      }
+      const missing = usernames.filter(name => !found.some(user => user.name.toLowerCase() === name.toLowerCase() || String(user.requestedUsername || '').toLowerCase() === name.toLowerCase()));
+      if (json && missing.length) ui.toast(`Could not find ${missing.slice(0, 3).join(', ')}`, { tone: 'warning' });
+    }
+    return { ids: [...new Set(ids)].slice(0, 100), names };
+  };
+
   let termsWindow = null;
   const openTerminations = () => {
     if (termsWindow) {
@@ -538,7 +574,7 @@
         const banned = Boolean(info && info.banned);
         const name = info ? clip(info.displayName, 60) || clip(info.name, 40) : `User ${id}`;
         const remove = ui.button('', { variant: 'ghost', icon: 'trash', title: 'Remove from watchlist', onClick: () => {
-          Rk.store.set('tools.terminationWatch', watchedIds().filter(item => item !== id));
+          saveWatched(watchedIds().filter(item => item !== id), watchedNames());
           render();
         } });
         return ui.row(
@@ -564,10 +600,12 @@
       const text = field.value.trim();
       if (!text) return;
       let id = /^\d{1,20}$/.test(text) ? Number(text) : null;
+      let name = null;
       if (!id) {
         const json = await Rk.api.post('https://users.roblox.com/v1/usernames/users', { usernames: [text], excludeBannedUsers: false }).catch(() => null);
         const user = json && Array.isArray(json.data) ? json.data.find(item => item && Rk.isId(item.id)) : null;
         id = user ? user.id : null;
+        name = user && typeof user.name === 'string' ? user.name : null;
       }
       if (!Rk.isId(id)) {
         ui.toast('Could not find that user', { tone: 'warning' });
@@ -582,7 +620,7 @@
         ui.toast('You can watch up to 100 users', { tone: 'warning' });
         return;
       }
-      Rk.store.set('tools.terminationWatch', [...ids, id]);
+      saveWatched([...ids, id], name ? { ...watchedNames(), [id]: name } : watchedNames());
       field.value = '';
       await render();
       setTimeout(() => Rk.bg('poll-now').then(render, () => {}), 600);
@@ -1619,8 +1657,12 @@
     run(ctx) {
       Rk.me().then(user => {
         if (!user) return;
-        const names = new Set([user.name, user.displayName, user.name ? `@${user.name}` : ''].filter(Boolean).map(name => name.toLowerCase()));
-        Rk.observe('#header, #navigation', container => Rk.observe('*', node => {
+        const fake = Rk.isEnabled('profiles.fakeName') ? [Rk.option('profiles.fakeName', 'displayName'), Rk.option('profiles.fakeName', 'username')] : [];
+        const names = new Set([user.name, user.displayName, ...fake].filter(name => typeof name === 'string' && name.trim()).flatMap(name => [name.trim(), `@${name.trim()}`]).map(name => name.toLowerCase()));
+        const page = Rk.page();
+        const ownProfile = page.type === 'profile' && Number(page.id) === user.id;
+        const areas = ['#header', '#navigation', '#left-navigation-container', ...(ownProfile ? ['.user-profile-header'] : [])];
+        Rk.observe(areas.join(', '), container => Rk.observe('*', node => {
           if (node.closest('[class^="rk-"]') || node.classList.contains('rk-tools-streamer')) return;
           for (const child of node.childNodes) {
             if (child.nodeType !== 3 || !names.has(child.textContent.trim().toLowerCase())) continue;
@@ -1973,6 +2015,7 @@
     description: 'Watch Roblox accounts and get a notification with your own sound when one gets terminated or comes back. Open the list from quick search.',
     default: false,
     options: [
+      { key: 'users', label: 'Users to watch (usernames or ids, comma separated)', type: 'text', maxLength: 2000, placeholder: 'Builderman, 156', default: '' },
       { key: 'assetId', label: 'Sound audio asset id', type: 'text', maxLength: 20, placeholder: 'Default sound', default: '' }
     ],
     css: `
@@ -1983,7 +2026,28 @@
       .rk-tools-terms-gone { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--rk-shift); color: var(--rk-muted); }
       .rk-tools-person { display: flex; flex-direction: column; min-width: 0; }
     `,
-    run: pollNow
+    run(ctx) {
+      pollNow();
+      let latest = 0;
+      const sync = async () => {
+        if (!Rk.isEnabled(ctx.id)) return;
+        const text = String(ctx.option('users') || '').trim();
+        if (watchText === null && !text && watchedIds().length) {
+          saveWatched(watchedIds(), watchedNames());
+          return;
+        }
+        if (text === watchText) return;
+        watchText = text;
+        const token = ++latest;
+        const { ids, names } = await resolveWatched(text);
+        if (token !== latest) return;
+        const before = watchedIds().join();
+        storeWatched(ids, names);
+        if (ids.join() !== before) Rk.bg('poll-now').catch(() => {});
+      };
+      sync();
+      Rk.onSettings(sync);
+    }
   });
 
   Rk.feature({

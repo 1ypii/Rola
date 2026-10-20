@@ -1032,11 +1032,11 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
     id: 'profiles.banner',
     category: 'profiles',
     name: 'Profile banner',
-    description: 'Shows a banner image above your own profile. Only you can see it.',
+    description: 'Shows a banner image or gif above your own profile and on your avatar page. Paste a link, choose a file or drop one in. Only you can see it.',
     default: false,
-    pages: PROFILE,
+    pages: ['profile', 'avatar'],
     options: [
-      { key: 'url', label: 'Image link', type: 'text', maxLength: 500, placeholder: 'https://', default: '' },
+      { key: 'image', label: 'Banner image or gif', type: 'image', default: '' },
       { key: 'height', label: 'Height (px)', type: 'number', min: 80, max: 400, step: 10, default: 200 },
       { key: 'position', label: 'Image focus', type: 'select', choices: [['top', 'Top'], ['center', 'Center'], ['bottom', 'Bottom']], default: 'center' }
     ],
@@ -1046,38 +1046,84 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
 .rk-profile-banner > img.rk-profile-banner-loaded { opacity: 1; }
 `,
     async run(ctx) {
-      if (!await ownProfile()) return;
-      const image = el('img', { alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
+      const onAvatar = Rk.page().type === 'avatar';
+      if (!onAvatar && !await ownProfile()) return;
+      const image = el('img', { alt: '', decoding: 'async' });
       const banner = el('div', { class: 'rk-profile-banner rk-hidden' }, image);
       image.addEventListener('load', () => image.classList.add('rk-profile-banner-loaded'));
       image.addEventListener('error', () => banner.classList.add('rk-hidden'));
-      const linkOf = value => {
-        try {
-          const url = new URL(String(value || '').trim());
-          return url.protocol === 'https:' ? url.href : null;
-        } catch {
-          return null;
-        }
-      };
-      const apply = () => {
-        const href = Rk.isEnabled(ctx.id) ? linkOf(ctx.option('url')) : null;
-        banner.classList.toggle('rk-hidden', !href);
+      let token = null;
+      const apply = async () => {
         banner.style.height = `${ctx.option('height')}px`;
         image.style.objectPosition = `center ${ctx.option('position')}`;
-        if (!href) {
-          image.removeAttribute('src');
-          image.classList.remove('rk-profile-banner-loaded');
-          return;
-        }
-        if (image.getAttribute('src') === href) return;
+        const next = Rk.isEnabled(ctx.id) ? ctx.option('image') : '';
+        if (next === token) return;
+        token = next;
+        const data = next ? await Rk.images.get(ctx.id, 'image') : null;
+        if (token !== next) return;
+        banner.classList.toggle('rk-hidden', !data);
         image.classList.remove('rk-profile-banner-loaded');
-        image.src = href;
+        if (data) image.src = data;
+        else image.removeAttribute('src');
       };
       apply();
       Rk.onSettings(apply);
+      if (onAvatar) {
+        Rk.observe('#avatar-react-container', container => {
+          const parent = container.parentElement;
+          if (parent && parent.firstElementChild !== banner) parent.prepend(banner);
+        });
+        return;
+      }
       Rk.observe('.user-profile-header', header => {
         if (banner.nextElementSibling !== header) header.before(banner);
       });
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.selfPresence',
+    category: 'profiles',
+    name: 'Your status on your top bar avatar',
+    description: 'Shows the online, in game or in Studio dot on your own avatar in the top bar, like Roblox shows on friends.',
+    default: false,
+    css: `
+.rk-self-presence-host { position: relative; }
+.rk-self-presence { position: absolute; right: -2px; bottom: -2px; z-index: 1; width: 11px; height: 11px; box-sizing: border-box; border: 2px solid var(--rk-bg); border-radius: 50%; pointer-events: none; }
+.rk-self-presence[data-state="online"] { background: #00a2ff; }
+.rk-self-presence[data-state="game"] { background: #02b757; }
+.rk-self-presence[data-state="studio"] { background: #f68802; }
+.rk-self-presence[data-state="offline"] { display: none; }
+`,
+    async run(ctx) {
+      const me = await Rk.me();
+      if (!me) return;
+      const states = ['offline', 'online', 'game', 'studio'];
+      const dot = el('span', { class: 'rk-self-presence', dataset: { state: 'offline' } });
+      let timer = 0;
+      const refresh = async () => {
+        clearTimeout(timer);
+        if (document.visibilityState !== 'visible' || !Rk.isEnabled(ctx.id)) return;
+        const map = await safe(Rk.api.presence([me.id]));
+        const entry = map && map.get(me.id);
+        const state = states[presenceType(entry)] || 'offline';
+        dot.dataset.state = state;
+        dot.title = { online: 'Online', game: entry && entry.lastLocation ? `Playing ${entry.lastLocation}` : 'In game', studio: 'In Studio', offline: 'Offline' }[state];
+        timer = setTimeout(refresh, 60000);
+      };
+      Rk.observe('.age-bracket-label', label => {
+        const avatar = label.querySelector('img, .thumbnail-2d-container, .avatar-card-image, [class*="avatar"]');
+        const host = avatar && avatar.tagName === 'IMG' ? avatar.parentElement : avatar;
+        if (!host || host.contains(dot)) return;
+        host.classList.add('rk-self-presence-host');
+        host.append(dot);
+      });
+      document.addEventListener('visibilitychange', refresh);
+      Rk.onSettings(() => {
+        dot.classList.toggle('rk-hidden', !Rk.isEnabled(ctx.id));
+        refresh();
+      });
+      refresh();
     }
   });
 
@@ -1857,21 +1903,22 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
   Rk.feature({
     id: 'profiles.joinCard',
     category: 'profiles',
-    name: 'Join card on profiles',
-    description: 'When someone is in an experience you can see, shows a card with that experience and a Play button that joins their server, at the bottom of their profile.',
+    name: 'Floating join bar on profiles',
+    description: 'When someone is in an experience you can see, a bar slides up once you scroll past their profile header, with a Join button that takes you to their server.',
     default: false,
     pages: PROFILE,
     css: `
-.rk-join-title { margin: 0 0 10px; font-size: 20px; font-weight: 700; color: var(--rk-text-strong); }
-.rk-join-card { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--rk-border); border-radius: 12px; background: var(--rk-surface); }
-.rk-join-card .rk-thumb { flex: none; border-radius: 8px; }
-.rk-join-name { flex: 1; min-width: 0; overflow: hidden; font-size: 16px; font-weight: 600; color: var(--rk-text-strong) !important; white-space: nowrap; text-overflow: ellipsis; text-decoration: none !important; }
-.rk-join-name:hover { text-decoration: underline !important; }
-.rk-join-play { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 20px; border: 0; border-radius: 8px; background: #e2531a; color: #ffffff; font-family: var(--rk-font); font-size: 16px; font-weight: 700; cursor: pointer; transition: filter var(--rk-fast) ease; }
-.rk-join-play:hover { filter: brightness(1.1); }
-.rk-join-section { margin-top: 24px; }
+.rk-profile-sticky { position: fixed; left: 50%; bottom: 16px; z-index: 1050; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: min(480px, calc(100vw - 32px)); padding: 8px 8px 8px 10px; border: 1px solid var(--rk-border); border-radius: 12px; background: var(--rk-bg); color: var(--rk-text-strong); font-family: var(--rk-font); box-shadow: var(--rk-shadow); visibility: hidden; transform: translate(-50%, calc(100% + 24px)); transition: transform var(--rk-med) var(--rk-ease), visibility 0s linear var(--rk-med); }
+.rk-profile-sticky.rk-profile-sticky-show { visibility: visible; transform: translate(-50%, 0); transition: transform var(--rk-med) var(--rk-ease), visibility 0s; }
+.rk-profile-sticky .rk-thumb { flex: none; }
+.rk-profile-sticky-icon { border-radius: 8px; }
+.rk-profile-sticky-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.rk-profile-sticky-user { overflow: hidden; font-size: 12px; color: var(--rk-muted); white-space: nowrap; text-overflow: ellipsis; }
+.rk-profile-sticky-game { overflow: hidden; font-size: 15px; font-weight: 700; color: var(--rk-text-strong) !important; white-space: nowrap; text-overflow: ellipsis; text-decoration: none !important; }
+.rk-profile-sticky-game:hover { text-decoration: underline !important; }
+@media (prefers-reduced-motion: reduce) { .rk-profile-sticky, .rk-profile-sticky.rk-profile-sticky-show { transition: none; } }
 `,
-    async run() {
+    async run(ctx) {
       const id = profileId();
       const [me, user] = await Promise.all([Rk.me(), profileUser()]);
       if (!id || !user || (me && me.id === id)) return;
@@ -1881,17 +1928,35 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       const universeId = Rk.isId(Number(entry.universeId)) ? Number(entry.universeId) : await safe(Rk.api.universeId(placeId));
       const name = typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : 'Experience';
       const jobId = typeof entry.gameId === 'string' ? entry.gameId : null;
-      const play = el('button', { type: 'button', class: 'rk-join-play' }, icon('play', 16), 'Play');
-      play.addEventListener('click', () => {
-        if (jobId) Rk.launch.server(placeId, jobId);
-        else Rk.launch.follow(id);
-      });
-      const card = el('div', { class: 'rk-join-card' },
-        ui.thumb(universeId ? Rk.thumb('GameIcon', universeId, '150x150') : Promise.resolve(null), { size: 56, alt: name }),
-        el('a', { class: 'rk-join-name', href: `/games/${placeId}`, title: name }, name),
-        play
+      const bar = el('div', { class: 'rk-profile-sticky', role: 'region', 'aria-label': 'Join bar' },
+        ui.thumb(Rk.thumb('AvatarHeadShot', id, '150x150'), { size: 36, round: true, alt: '' }),
+        ui.thumb(universeId ? Rk.thumb('GameIcon', universeId, '150x150') : Promise.resolve(null), { size: 36, alt: '', className: 'rk-profile-sticky-icon' }),
+        el('span', { class: 'rk-profile-sticky-text' },
+          el('span', { class: 'rk-profile-sticky-user' }, `${user.displayName || user.name} is playing`),
+          el('a', { class: 'rk-profile-sticky-game', href: `/games/${placeId}`, title: name }, name)
+        ),
+        ui.button('Join', { variant: 'primary', size: 'md', icon: 'play', onClick: () => {
+          if (jobId) Rk.launch.server(placeId, jobId);
+          else Rk.launch.follow(id);
+        } })
       );
-      addSection('profile', el('div', { class: 'rk-join-section' }, el('h2', { class: 'rk-join-title' }, `Join ${user.displayName || user.name}`), card), 99);
+      document.body.append(bar);
+      let watched = null;
+      let past = false;
+      const sync = () => bar.classList.toggle('rk-profile-sticky-show', past && Rk.isEnabled(ctx.id));
+      const io = new IntersectionObserver(entries => {
+        const last = entries[entries.length - 1];
+        const rect = last && last.boundingClientRect;
+        past = Boolean(last && !last.isIntersecting && rect && rect.bottom < 0);
+        sync();
+      });
+      Rk.observe('.user-profile-header', header => {
+        if (header === watched) return;
+        watched = header;
+        io.disconnect();
+        io.observe(header);
+      });
+      Rk.onSettings(sync);
     }
   });
 

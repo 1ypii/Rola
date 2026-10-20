@@ -559,6 +559,37 @@ const imageData = async ({ url } = {}) => {
   return `data:${type};base64,${encodeBytes(buffer)}`;
 };
 
+const REGIONS_KEY = 'rkbg:regions';
+
+const regionList = async () => {
+  const saved = (await chrome.storage.local.get(REGIONS_KEY))[REGIONS_KEY];
+  if (saved && Date.now() - saved.time < 86400000 && Array.isArray(saved.labels) && Array.isArray(saved.groups)) return { labels: saved.labels, groups: saved.groups };
+  const response = await fetch('https://raw.githubusercontent.com/RoRegion/Storage/refs/heads/main/regionList.json', { credentials: 'omit' });
+  if (!response.ok) throw new Error(`region list failed ${response.status}`);
+  const raw = await response.json();
+  if (!raw || !Array.isArray(raw._c) || !Array.isArray(raw._ci)) throw new Error('unexpected region list');
+  const labels = [];
+  const groups = [];
+  for (const [key, entry] of Object.entries(raw)) {
+    const match = /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.0$/.exec(key);
+    if (!match || !entry || typeof entry !== 'object') continue;
+    const city = raw._ci[entry.ci];
+    const country = Array.isArray(raw._c[entry.co]) ? raw._c[entry.co][1] : null;
+    if (typeof city !== 'string' || typeof country !== 'string') continue;
+    const label = `${city.slice(0, 40)}, ${country.slice(0, 4)}`;
+    let index = labels.indexOf(label);
+    if (index === -1) {
+      index = labels.push(label) - 1;
+      groups.push([]);
+    }
+    groups[index].push(match[1]);
+  }
+  if (!labels.length) throw new Error('empty region list');
+  const list = { labels, groups: groups.map(prefixes => prefixes.join(' ')) };
+  await chrome.storage.local.set({ [REGIONS_KEY]: { time: Date.now(), ...list } });
+  return list;
+};
+
 const handlers = {
   values: () => loadValues(),
   notify: payload => {
@@ -568,6 +599,7 @@ const handlers = {
   },
   download: payload => download(payload || {}),
   'image-data': payload => imageData(payload || {}),
+  regions: () => regionList(),
   sound: payload => playSound(payload).then(() => true),
   music: () => syncMusic(),
   unfriends: async () => {

@@ -1174,8 +1174,8 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
     css: reveal('inline-flex', 'ping')
   });
 
-  const REGIONS_URL = 'https://raw.githubusercontent.com/RoRegion/Storage/refs/heads/main/regionList.json';
   const REGIONS_KEY = 'rk-servers-regions';
+  const FLAGS_KEY = 'rk-servers-flags';
   const REGIONS_TTL = 86400000;
 
   let regionsRequest = null;
@@ -1193,31 +1193,17 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
           if (map.size) return map;
         }
       } catch {}
-      const res = await fetch(REGIONS_URL, { credentials: 'omit' });
-      if (!res.ok) throw new Error(`region list failed ${res.status}`);
-      const raw = await res.json();
-      if (!raw || !Array.isArray(raw._c) || !Array.isArray(raw._ci)) throw new Error('unexpected region list');
-      const labels = [];
-      const groups = [];
+      const list = await Rk.bg('regions');
+      const labels = list && Array.isArray(list.labels) ? list.labels : [];
+      const groups = list && Array.isArray(list.groups) ? list.groups : [];
       const map = new Map();
-      for (const [key, entry] of Object.entries(raw)) {
-        const match = /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.0$/.exec(key);
-        if (!match || !entry || typeof entry !== 'object') continue;
-        const city = raw._ci[entry.ci];
-        const country = Array.isArray(raw._c[entry.co]) ? raw._c[entry.co][1] : null;
-        if (typeof city !== 'string' || typeof country !== 'string') continue;
-        const label = `${city.slice(0, 40)}, ${country.slice(0, 4)}`;
-        let index = labels.indexOf(label);
-        if (index === -1) {
-          index = labels.push(label) - 1;
-          groups.push([]);
-        }
-        groups[index].push(match[1]);
-        map.set(match[1], label);
-      }
+      groups.forEach((prefixes, index) => {
+        if (typeof labels[index] !== 'string' || typeof prefixes !== 'string') return;
+        for (const prefix of prefixes.split(' ')) map.set(prefix, labels[index]);
+      });
       if (!map.size) throw new Error('empty region list');
       try {
-        localStorage.setItem(REGIONS_KEY, JSON.stringify({ time: Date.now(), labels, groups: groups.map(list => list.join(' ')) }));
+        localStorage.setItem(REGIONS_KEY, JSON.stringify({ time: Date.now(), labels, groups }));
       } catch {}
       return map;
     })();
@@ -1225,6 +1211,27 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
       regionsRequest = null;
     });
     return regionsRequest;
+  };
+
+  const flagRequests = new Map();
+  const flagFor = code => {
+    if (!/^[A-Z]{2}$/.test(code)) return Promise.resolve(null);
+    if (flagRequests.has(code)) return flagRequests.get(code);
+    const request = (async () => {
+      let saved = {};
+      try {
+        saved = JSON.parse(localStorage.getItem(FLAGS_KEY) || '{}') || {};
+      } catch {}
+      if (typeof saved[code] === 'string' && saved[code].startsWith('data:image/')) return saved[code];
+      const data = await Rk.bg('image-data', { url: `https://flagcdn.com/w40/${code.toLowerCase()}.png` }).catch(() => null);
+      if (typeof data !== 'string' || !data.startsWith('data:image/')) return null;
+      try {
+        localStorage.setItem(FLAGS_KEY, JSON.stringify({ ...saved, [code]: data }));
+      } catch {}
+      return data;
+    })();
+    flagRequests.set(code, request);
+    return request;
   };
 
   Rk.feature({
@@ -1237,9 +1244,22 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
     css: `
 .rk-servers-region {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 13px;
   color: var(--rk-muted);
   white-space: nowrap;
+}
+.rk-servers-flag {
+  width: 18px;
+  height: 13px;
+  border-radius: 2px;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.rk-servers-region-missing {
+  opacity: 0.6;
 }
 .rk-servers-region-pending {
   opacity: 0.5;
@@ -1261,13 +1281,24 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
       let pumpTimer = 0;
       let stopped = false;
 
-      const show = (jobId, label) => {
-        for (const span of waiting.get(jobId) || []) {
-          span.classList.remove('rk-servers-region-pending');
-          span.classList.toggle('rk-hidden', !label);
-          setText(span, label || '');
-          if (label) span.title = `Server in ${label}`;
+      const fill = (span, result) => {
+        span.classList.remove('rk-servers-region-pending');
+        span.classList.toggle('rk-servers-region-missing', !result.label);
+        if (!result.label) {
+          span.replaceChildren(result.reason);
+          span.title = result.detail || result.reason;
+          return;
         }
+        const code = result.label.split(', ').pop();
+        span.replaceChildren(result.label);
+        span.title = `Server in ${result.label}`;
+        flagFor(code).then(data => {
+          if (data && span.isConnected && !span.querySelector('.rk-servers-flag')) span.prepend(el('img', { class: 'rk-servers-flag', src: data, alt: code }));
+        });
+      };
+
+      const show = (jobId, result) => {
+        for (const span of waiting.get(jobId) || []) fill(span, result);
         waiting.delete(jobId);
       };
 
@@ -1276,17 +1307,25 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
         try {
           json = await Rk.api.post('https://gamejoin.roblox.com/v1/join-game-instance', { placeId: Number(placeId), isTeleport: false, gameId: jobId, gameJoinAttemptId: crypto.randomUUID() });
         } catch (err) {
-          if (err && err.status === 429) pausedUntil = Date.now() + 30000;
+          if (err && err.status === 429) {
+            pausedUntil = Date.now() + 30000;
+            return undefined;
+          }
           if (err && (err.status === 401 || err.status === 403)) stopped = true;
-          return err && err.status === 429 ? undefined : null;
+          return { reason: 'Region unavailable', detail: `Roblox refused the lookup${err && err.status ? ` (${err.status})` : ''}` };
         }
         const script = json && json.joinScript;
         const endpoint = script && Array.isArray(script.UdmuxEndpoints) && script.UdmuxEndpoints[0] ? script.UdmuxEndpoints[0].Address : null;
         const address = typeof endpoint === 'string' ? endpoint : script && typeof script.MachineAddress === 'string' ? script.MachineAddress : null;
         const match = address ? /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/.exec(address) : null;
-        if (!match) return null;
+        if (!match) {
+          const message = json && typeof json.message === 'string' && json.message ? json.message : '';
+          return { reason: 'Region unknown', detail: `Roblox did not give this server's address${message ? `: ${message}` : ''}` };
+        }
         const regions = await loadRegions().catch(() => null);
-        return regions ? regions.get(match[1]) || null : null;
+        if (!regions) return { reason: 'Region unknown', detail: 'Could not load the region list' };
+        const label = regions.get(match[1]);
+        return label ? { label } : { reason: 'Unknown region', detail: `Datacenter ${match[1]}.x is not in the public region list yet` };
       };
 
       const pump = () => {
@@ -1302,26 +1341,24 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
           const jobId = queue.shift();
           lastStart = Date.now();
           active += 1;
-          locate(jobId).then(label => {
-            if (label === undefined) {
+          locate(jobId).then(result => {
+            if (result === undefined) {
               queue.push(jobId);
               return;
             }
-            found.set(jobId, label);
-            show(jobId, label);
+            found.set(jobId, result);
+            show(jobId, result);
           }).finally(() => {
             active -= 1;
             pump();
           });
         }
-        if (stopped) for (const jobId of [...waiting.keys()]) show(jobId, null);
+        if (stopped) for (const jobId of [...waiting.keys()]) show(jobId, { reason: 'Region unavailable', detail: 'Roblox refused the lookup' });
       };
 
       const request = (jobId, span) => {
         if (found.has(jobId)) {
-          const label = found.get(jobId);
-          span.classList.toggle('rk-hidden', !label);
-          setText(span, label || '');
+          fill(span, found.get(jobId));
           return;
         }
         if (!waiting.has(jobId)) {
@@ -1346,11 +1383,7 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
 
       Rk.onSettings(() => {
         const enabled = Rk.isEnabled(ctx.id);
-        for (const span of document.querySelectorAll('.rk-servers-region')) {
-          const row = span.closest('[data-job]');
-          const jobId = row ? row.dataset.job : '';
-          span.classList.toggle('rk-hidden', !enabled || (found.has(jobId) && !found.get(jobId)));
-        }
+        for (const span of document.querySelectorAll('.rk-servers-region')) span.classList.toggle('rk-hidden', !enabled);
         if (enabled) pump();
       });
     }
