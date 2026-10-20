@@ -964,17 +964,18 @@
       ui.thumb(Rk.thumb('Asset', item.assetId, '150x150'), { size: 36, alt: '' }),
       el('div', { class: 'rk-trading-side-text' },
         ui.link(`/catalog/${item.assetId}`, item.name),
-        el('div', { class: 'rk-trading-side-meta' }, item.serial ? serialPill(item.serial) : null, el('span', null, `RAP ${fmt.num(item.rap)}`))
+        el('div', { class: 'rk-trading-side-meta' }, item.serial ? serialPill(item.serial) : null, el('span', null, `RAP ${fmt.num(item.rap)}`), el('span', null, `Value ${fmt.num(item.value)}`))
       ),
       ui.robux(item.value)
     )),
     side.robux ? el('div', { class: 'rk-trading-side-item rk-trading-side-robux' }, el('span', { class: 'rk-trading-side-icon' }, icon('robux', 18)), el('div', { class: 'rk-trading-side-text' }, 'Robux'), ui.robux(side.robux)) : null,
     !side.items.length && !side.robux ? el('div', { class: 'rk-muted' }, 'Nothing') : null,
-    el('div', { class: 'rk-trading-side-total rk-muted' }, `RAP ${fmt.num(side.rap)}`)
+    el('div', { class: 'rk-trading-side-total rk-muted' }, `RAP ${fmt.num(side.rap)} · Value ${fmt.num(side.value)}`)
   );
 
   const inspectorCss = `
     .rk-native-trade-tabs { display: none !important; }
+    html.rk-trades-history #trades-web-app .trades-react { display: none !important; }
     .rk-trading-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
     .rk-trading-trades { display: flex; flex-direction: column; gap: 2px; }
     .rk-trading-trade { border-radius: var(--rk-radius); transition: background-color var(--rk-fast) ease; }
@@ -1138,6 +1139,7 @@
 
       const render = () => {
         const tab = state.get(current);
+        document.documentElement.classList.toggle('rk-trades-history', Rk.isEnabled('trading.tradeInspector') && (current === 'Completed' || current === 'Inactive'));
         visible.disconnect();
         for (const [name, button] of buttons) {
           button.classList.toggle('rk-btn-active', name === current);
