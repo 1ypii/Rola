@@ -670,8 +670,36 @@ const regionFor = async ip => {
   return label;
 };
 
+const jobRegions = new Map();
+let jobsLoaded = null;
+let jobsSaveTimer = 0;
+
+const loadJobs = () => {
+  if (!jobsLoaded) {
+    jobsLoaded = chrome.storage.local.get('rkbg:jobs').then(stored => {
+      const saved = stored['rkbg:jobs'] && typeof stored['rkbg:jobs'] === 'object' ? stored['rkbg:jobs'] : {};
+      for (const [id, entry] of Object.entries(saved)) {
+        if (entry && typeof entry.label === 'string' && Date.now() - entry.at < 1800000) jobRegions.set(id, entry);
+      }
+    }).catch(() => {});
+  }
+  return jobsLoaded;
+};
+
+const saveJobs = () => {
+  clearTimeout(jobsSaveTimer);
+  jobsSaveTimer = setTimeout(() => {
+    const now = Date.now();
+    const fresh = [...jobRegions].filter(([, entry]) => now - entry.at < 1800000).slice(-2000);
+    chrome.storage.local.set({ 'rkbg:jobs': Object.fromEntries(fresh) }).catch(() => {});
+  }, 2000);
+};
+
 const serverRegion = async ({ placeId, jobId } = {}) => {
   if (!Number.isSafeInteger(placeId) || placeId <= 0 || typeof jobId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) throw new Error('bad server');
+  await loadJobs();
+  const known = jobRegions.get(jobId);
+  if (known && Date.now() - known.at < 1800000) return { label: known.label };
   await ensureRegionRule();
   let json;
   try {
@@ -689,6 +717,10 @@ const serverRegion = async ({ placeId, jobId } = {}) => {
     return { reason: 'Region unknown', detail: `Roblox did not give this server's address${message ? `: ${message}` : ''}` };
   }
   const label = await regionFor(address).catch(() => null);
+  if (label) {
+    jobRegions.set(jobId, { label, at: Date.now() });
+    saveJobs();
+  }
   return label ? { label } : { reason: 'Unknown region', detail: `No location found for ${address.split('.').slice(0, 3).join('.')}.x` };
 };
 
