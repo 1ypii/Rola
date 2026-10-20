@@ -1240,7 +1240,9 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
       const queue = [];
       let active = 0;
       let pausedUntil = 0;
-      let lastStart = 0;
+      let limit = 6;
+      let okStreak = 0;
+      let lastBackoff = 0;
       let pumpTimer = 0;
       let stopped = false;
 
@@ -1272,16 +1274,27 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
         const result = await Rk.bg('server-region', { placeId: Number(placeId), jobId }).catch(() => null);
         if (!result) return { reason: 'Region unknown', detail: 'Rola could not run the region lookup' };
         if (result.retry) {
-          pausedUntil = Date.now() + 30000;
+          const now = Date.now();
+          if (now - lastBackoff > 700) {
+            limit = Math.max(2, Math.floor(limit * 0.7));
+            lastBackoff = now;
+          }
+          okStreak = 0;
+          pausedUntil = Math.max(pausedUntil, now + 600 + Math.random() * 600);
           return undefined;
+        }
+        okStreak += 1;
+        if (okStreak >= limit * 2 && limit < 12) {
+          limit += 1;
+          okStreak = 0;
         }
         if (result.stop) stopped = true;
         return result;
       };
 
       const pump = () => {
-        while (active < 2 && queue.length && !stopped && Rk.isEnabled(ctx.id)) {
-          const wait = Math.max(pausedUntil, lastStart + 1000) - Date.now();
+        while (active < limit && queue.length && !stopped && Rk.isEnabled(ctx.id)) {
+          const wait = pausedUntil - Date.now();
           if (wait > 0) {
             if (!pumpTimer) pumpTimer = setTimeout(() => {
               pumpTimer = 0;
@@ -1290,7 +1303,6 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
             return;
           }
           const jobId = queue.shift();
-          lastStart = Date.now();
           active += 1;
           locate(jobId).then(result => {
             if (result === undefined) {
