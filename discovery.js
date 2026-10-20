@@ -1085,10 +1085,15 @@
     css: '.rk-recommended-hidden { display: none !important; }',
     run(ctx) {
       const rows = new Set();
-      sortHeadings((title, row) => {
+      Rk.observe('h2, h3, .container-header, .sort-header', node => {
+        if (isOurs(node)) return;
+        const heading = node.matches('.container-header') ? node.querySelector('h2, h3') || node.firstElementChild || node : node;
+        if (!/^recommended for you\b/.test(clip(heading.textContent, 200).toLowerCase())) return;
+        const row = rowFor(node);
+        if (!row || rows.has(row)) return;
         rows.add(row);
         row.classList.toggle('rk-recommended-hidden', Rk.isEnabled(ctx.id));
-      }, title => /^recommended for you\b/.test(title));
+      });
       Rk.onSettings(() => {
         for (const row of rows) {
           if (!row.isConnected) rows.delete(row);
@@ -1130,7 +1135,8 @@
     pages: ['home'],
     css: `
 .rk-friend-game {
-  max-width: 100%;
+  width: 0;
+  min-width: 100%;
   overflow: hidden;
   text-align: center;
   font-family: var(--rk-font);
@@ -1145,10 +1151,10 @@
     run() {
       friendTiles((tile, id, entry) => {
         const name = clip(entry.lastLocation);
-        if (!name || tile.querySelector('.rk-friend-game')) return;
+        if (!name || tile.querySelector('.rk-friend-game, .friends-carousel-tile-experience')) return;
         const label = el('div', { class: 'rk-friend-game', title: name }, name);
-        const anchor = tile.querySelector('.friends-carousel-tile-name');
-        if (anchor) anchor.after(label);
+        const row = tile.querySelector('.friends-carousel-tile-label');
+        if (row) row.after(label);
         else tile.append(label);
       });
     }

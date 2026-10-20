@@ -322,8 +322,8 @@
 
   const avatarArea = () => {
     if (!avatarNode) {
-      avatarNode = el('div', { class: 'rk-avatar-panels', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', columnGap: '16px', alignItems: 'start', marginTop: '24px' } });
-      Rk.mount('#content', avatarNode, { position: 'append' });
+      avatarNode = el('div', { class: 'rk-avatar-panels', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', columnGap: '16px', alignItems: 'start', marginBottom: '24px' } });
+      Rk.mount('#avatar-react-container', avatarNode, { position: 'before' });
     }
     return avatarNode;
   };
@@ -564,15 +564,13 @@
     id: 'avatar.statusPills',
     category: 'avatar',
     name: 'Item status pills',
-    description: 'Shows pills for limited, off sale, free, remaining stock and layered clothing.',
+    description: 'Shows pills for off sale, free, remaining stock and layered clothing.',
     pages: ['item'],
     async run() {
       const { kind, id } = Rk.page();
       if (!ITEM_TYPES[kind] || kind === 'badge' || !Rk.isId(id)) return;
       const meta = await itemMeta(kind, id);
       if (!meta) return;
-      if (meta.limitedU) addPill(ui.pill('Limited U', 'accent'));
-      else if (meta.limited) addPill(ui.pill('Limited', 'accent'));
       if (!meta.forSale && !meta.limited && !meta.limitedU) addPill(ui.pill('Off sale', 'neutral'));
       else if (meta.price === 0) addPill(ui.pill('Free', 'success'));
       if (meta.remaining > 0) addPill(ui.pill(`${fmt.num(meta.remaining)} remaining`, 'warning'));
@@ -1081,13 +1079,28 @@
     id: 'avatar.priceHistory',
     category: 'avatar',
     name: 'Price change history',
-    description: 'Remembers item prices between visits and tells you when one changed.',
+    description: 'Tells you when an item price changed. Limited items use the sale history from Roblox, other items are remembered between visits.',
     default: false,
     pages: ['item'],
     async run() {
       const { kind, id } = Rk.page();
       if (!isCatalogKind(kind) || !Rk.isId(id)) return;
       const meta = await itemMeta(kind, id);
+      if (meta && (meta.limited || meta.limitedU) && kind === 'asset') {
+        const data = await Rk.api.get(`https://economy.roblox.com/v1/assets/${id}/resale-data`, { cache: 60000 }).catch(() => null);
+        const sales = (isObject(data) && Array.isArray(data.priceDataPoints) ? data.priceDataPoints : [])
+          .map(point => [isObject(point) ? Date.parse(point.date) : NaN, isObject(point) ? Number(point.value) : NaN])
+          .filter(([time, value]) => Number.isFinite(time) && Number.isFinite(value) && value > 0)
+          .sort((a, b) => a[0] - b[0]);
+        if (sales.length < 2) return;
+        const latest = sales[sales.length - 1];
+        const monthAgo = sales.find(([time]) => time >= latest[0] - 30 * 24 * HOUR) || sales[0];
+        if (monthAgo === latest || monthAgo[1] === latest[1]) return;
+        const pill = ui.pill(`Sold for ${fmt.num(latest[1])}, was ${fmt.num(monthAgo[1])} on ${fmt.date(monthAgo[0])}`, latest[1] < monthAgo[1] ? 'success' : 'danger', { title: 'From Roblox sale history' });
+        pill.prepend(icon('chart', 12));
+        addPill(pill);
+        return;
+      }
       const price = meta ? meta.price : null;
       if (price === null) return;
       const key = `${kind}:${id}`;
@@ -1340,13 +1353,18 @@
       let reverted = false;
       let checking = false;
       let again = false;
-      const typeControl = name => [...editor.querySelectorAll(controls)].find(node => node.textContent.trim() === name && !node.closest(OURS)) || null;
+      let timer = 0;
       editor.addEventListener('pointerdown', event => {
+        if (!event.isTrusted) return;
         const target = event.target instanceof Element ? event.target.closest(controls) : null;
         const text = target ? target.textContent.trim() : '';
-        if (!event.isTrusted || (text !== 'R6' && text !== 'R15')) return;
-        type = text;
-        reverted = false;
+        if (text === 'R6' || text === 'R15') {
+          type = text;
+          reverted = false;
+          return;
+        }
+        clearTimeout(timer);
+        timer = setTimeout(() => check(), 1500);
       }, true);
       const check = async () => {
         if (!Rk.isEnabled(ctx.id)) return;
@@ -1364,10 +1382,15 @@
             ui.toast('Roblox needs R15 for what you equipped', { tone: 'warning' });
           } else {
             reverted = true;
-            const control = typeControl('R6');
-            if (control) control.click();
-            else await Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: 'R6' }).catch(() => null);
-            ui.toast(control ? 'Kept your avatar on R6' : 'Kept your avatar on R6, reload the editor to see it', { tone: 'success' });
+            await Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: 'R6' }).catch(() => null);
+            const after = avatarType(await Rk.api.get(AVATAR_URL).catch(() => null));
+            if (after === 'R6') {
+              ui.toast('Kept you on R6, reload the editor to see it', { tone: 'success' });
+            } else {
+              type = 'R15';
+              reverted = false;
+              ui.toast('Roblox requires R15 for that head, so it could not stay on R6', { tone: 'warning', duration: 6000 });
+            }
           }
         } else if (current) {
           if (current === type) reverted = false;
@@ -2025,6 +2048,8 @@
     .rk-avatar-pin { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--rk-radius); background: transparent; color: var(--rk-muted); opacity: 0.45; cursor: pointer; transition: opacity var(--rk-fast) ease, background-color var(--rk-fast) ease, color var(--rk-fast) ease; }
     .rk-avatar-pin:hover { opacity: 1; background: var(--rk-hover); }
     .rk-avatar-pin[aria-pressed="true"] { color: var(--rk-accent); opacity: 1; }
+    .rk-avatar-pin-flash { animation: rk-avatar-pin-flash 700ms var(--rk-ease); }
+    @keyframes rk-avatar-pin-flash { from { box-shadow: 0 0 0 2px var(--rk-accent); } to { box-shadow: 0 0 0 2px transparent; } }
   `;
 
   const pinButton = (outfit, name, onChange) => {
@@ -2033,7 +2058,7 @@
     pin.addEventListener('click', event => {
       event.stopPropagation();
       togglePinnedOutfit(outfit.id);
-      onChange();
+      onChange(outfit.id);
     });
     return pin;
   };
@@ -2062,6 +2087,7 @@
       let grid = null;
       let nativeCount = -1;
       let reloadTimer = 0;
+      let order = [];
       const nativeItems = () => [...pane.querySelectorAll('#avatar-items-container li')];
       const nativeMatch = (outfit, index) => {
         const name = str(outfit.name, 100);
@@ -2086,12 +2112,15 @@
         }
         card.classList.remove('rk-busy');
       };
-      const render = () => {
+      const render = toggled => {
         if (!grid) return;
-        grid.replaceChildren(...pinnedFirst(outfits).map(outfit => {
+        const kept = order.map(id => outfits.find(outfit => outfit.id === id)).filter(Boolean);
+        const list = toggled && kept.length === outfits.length ? kept : pinnedFirst(outfits);
+        order = list.map(outfit => outfit.id);
+        grid.replaceChildren(...list.map(outfit => {
           const name = str(outfit.name, 100) || 'Outfit';
           const pinned = pinnedOutfitIds().includes(outfit.id);
-          const card = el('div', { class: `rk-avatar-tile rk-avatar-outfit${pinned ? ' rk-avatar-outfit-pinned' : ''}`, role: 'button', tabindex: '0', title: name },
+          const card = el('div', { class: `rk-avatar-tile rk-avatar-outfit${pinned ? ' rk-avatar-outfit-pinned' : ''}${outfit.id === toggled ? ' rk-avatar-pin-flash' : ''}`, role: 'button', tabindex: '0', title: name },
             ui.thumb(Rk.thumb('Outfit', outfit.id, '150x150'), { size: 120, alt: name }),
             el('span', { class: 'rk-avatar-tile-name' }, name),
             pinButton(outfit, name, render)
@@ -2212,14 +2241,15 @@
         requestAnimationFrame(() => list.classList.add('rk-menu-open'));
         const saved = await loadOutfits();
         if (!list.isConnected) return;
-        const render = () => {
+        const order = pinnedFirst(saved);
+        const render = toggled => {
           const pins = pinnedOutfitIds();
-          list.replaceChildren(...pinnedFirst(saved).map(outfit => {
+          list.replaceChildren(...order.map(outfit => {
             const isPinned = pins.includes(outfit.id);
             const name = str(outfit.name, 100) || 'Outfit';
             const item = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem' }, ui.thumb(Rk.thumb('Outfit', outfit.id, '150x150'), { size: 36 }), el('span', null, name));
             item.addEventListener('click', () => wear(outfit, item));
-            return el('div', { class: `rk-avatar-quick-row${isPinned ? ' rk-avatar-quick-pinned' : ''}` }, item, pinButton(outfit, name, render));
+            return el('div', { class: `rk-avatar-quick-row${isPinned ? ' rk-avatar-quick-pinned' : ''}${outfit.id === toggled ? ' rk-avatar-pin-flash' : ''}` }, item, pinButton(outfit, name, render));
           }));
         };
         if (!saved.length) list.replaceChildren(el('div', { class: 'rk-avatar-quick-empty' }, 'No saved outfits yet'));

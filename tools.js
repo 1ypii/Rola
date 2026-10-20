@@ -1668,16 +1668,58 @@
       { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Roblox audio id', default: '' }
     ],
     run(ctx) {
-      const failed = /insufficient (robux|funds)|you need more robux|purchase failed, insufficient|need .* more to purchase/i;
+      const failed = /insufficient (robux|funds)|not enough robux|need more robux|you need .*more robux|buy more robux|get more robux|purchase failed, insufficient|need .* more to purchase/i;
+      const buyText = /^(buy|buy now|purchase|buy item|buy pass|buy bundle)$/i;
       let last = 0;
-      const check = node => {
-        if (!Rk.isEnabled(ctx.id) || !failed.test(node.textContent || '')) return;
+      let balance = null;
+      let balanceAt = 0;
+      const play = () => {
         const assetId = clip(ctx.option('assetId'), 20);
         if (!/^\d{1,20}$/.test(assetId) || Date.now() - last < 3000) return;
         last = Date.now();
         Rk.bg('sound', { assetId }).catch(() => {});
       };
-      Rk.observe('.modal-insufficient-funds, .modal-title, [role="dialog"] h1, [role="dialog"] h2, .modal-message', check);
+      const amount = text => {
+        const match = /(\d{1,3}(?:,\d{3})+|\d+)/.exec(text || '');
+        return match ? Number(match[1].replace(/,/g, '')) : null;
+      };
+      const robuxBalance = async () => {
+        if (balance !== null && Date.now() - balanceAt < 15000) return balance;
+        const user = await Rk.me();
+        const json = user ? await Rk.api.get(`https://economy.roblox.com/v1/users/${user.id}/currency`).catch(() => null) : null;
+        balance = json && Number.isSafeInteger(json.robux) ? json.robux : null;
+        balanceAt = Date.now();
+        return balance;
+      };
+      const pagePrice = button => {
+        const own = button.querySelector('.icon-robux-16x16, .icon-robux-gray-16x16, [class*="icon-robux"]') ? amount(button.textContent) : null;
+        if (own !== null) return own;
+        const dialog = button.closest('[role="dialog"], .modal, .modal-dialog');
+        if (dialog) {
+          const inDialog = dialog.querySelector('.text-robux-lg, .text-robux, [class*="robux"] + span, [class*="price"]');
+          if (inDialog && amount(inDialog.textContent) !== null) return amount(inDialog.textContent);
+        }
+        const label = [...document.querySelectorAll('span, div, dt, th')].find(node => node.children.length === 0 && /^(best )?price$/i.test(node.textContent.trim()));
+        if (label && label.nextElementSibling && amount(label.nextElementSibling.textContent) !== null) return amount(label.nextElementSibling.textContent);
+        if (label && label.parentElement && label.parentElement.nextElementSibling && amount(label.parentElement.nextElementSibling.textContent) !== null) return amount(label.parentElement.nextElementSibling.textContent);
+        const price = document.querySelector('#item-details .text-robux-lg, .item-details-section .text-robux-lg, .price-container .text-robux-lg, .text-robux-lg');
+        return price ? amount(price.textContent) : null;
+      };
+      document.addEventListener('click', async event => {
+        if (!Rk.isEnabled(ctx.id) || !(event.target instanceof Element)) return;
+        const button = event.target.closest('button, a, [role="button"]');
+        if (!button) return;
+        const text = button.textContent.trim();
+        const priced = button.querySelector('[class*="icon-robux"]') && amount(text) !== null && text.length < 20;
+        if (!buyText.test(text) && !priced) return;
+        const price = pagePrice(button);
+        if (!price) return;
+        const robux = await robuxBalance();
+        if (robux !== null && robux < price) play();
+      }, true);
+      Rk.observe('.modal-insufficient-funds, .modal-title, [role="dialog"] h1, [role="dialog"] h2, [role="dialog"] p, .modal-message', node => {
+        if (Rk.isEnabled(ctx.id) && failed.test(node.textContent || '')) play();
+      });
     }
   });
 

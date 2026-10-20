@@ -128,11 +128,11 @@
   ];
 
   const storedTheme = () => {
-    const saved = Rk.store.get('settings.theme', 'sakura');
-    return themeChoices().some(([id]) => id === saved) ? saved : 'sakura';
+    const saved = Rk.store.get('settings.theme', 'classic');
+    return themeChoices().some(([id]) => id === saved) ? saved : 'classic';
   };
 
-  let theme = 'sakura';
+  let theme = 'classic';
 
   const activeTheme = () => savedThemes().find(item => item.id === theme) || null;
   const currentTheme = () => builtInThemes[theme] || activeTheme();
@@ -344,7 +344,7 @@
       Rk.store.set('settings.themes', savedThemes().filter(item => item.id !== editing.id));
       saved = true;
       handle.close();
-      setTheme('sakura');
+      setTheme('classic');
     };
     const removeButton = editing ? ui.button('Delete', { variant: 'ghost', onClick: remove }) : null;
     if (removeButton) removeButton.classList.add('rk-settings-reset');

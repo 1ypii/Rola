@@ -1858,6 +1858,14 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
 .rk-best-status[data-state="online"] { color: #00a2ff; }
 .rk-best-status[data-state="game"] { color: #02b757; }
 .rk-best-status[data-state="studio"] { color: #f68802; }
+.rk-best-empty { padding: 4px 0; font-size: 14px; color: var(--rk-muted); }
+.rk-friends-heartable { position: relative; }
+.rk-friends-heart { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--rk-muted); cursor: pointer; opacity: 0; transition: opacity var(--rk-fast) ease, color var(--rk-fast) ease, transform var(--rk-fast) var(--rk-ease); }
+.rk-friends-heartable:hover > .rk-friends-heart, .rk-friends-heart:focus-visible, .rk-friends-heart[aria-pressed="true"] { opacity: 1; }
+.rk-friends-heart:hover { color: var(--rk-text-strong); }
+.rk-friends-heart[aria-pressed="true"] { color: #ff4d6d; }
+.rk-friends-heart[aria-pressed="true"] svg { fill: currentColor; }
+.rk-friends-heart:active { transform: scale(0.9); }
 `,
     async run() {
       const bestList = () => {
@@ -1908,39 +1916,188 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         return;
       }
       if (!await ownFriendsPage()) return;
-      const ids = await prune();
-      if (!ids.length) return;
-      const [users, presence] = await Promise.all([safe(Rk.api.users(ids)), presenceOf(ids)]);
       const states = ['offline', 'online', 'game', 'studio'];
-      const cards = ids.map(userId => {
-        const user = users && users.get(userId);
-        const entry = presence.get(userId);
-        const state = states[presenceType(entry)] || 'offline';
-        const where = entry && typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : '';
-        const status = { online: 'Online', game: where || 'In game', studio: where ? `Studio: ${where}` : 'In Studio', offline: 'Offline' }[state];
-        const name = user ? String(user.displayName || user.name) : `User ${userId}`;
-        return el('a', { class: 'rk-best-card', href: `/users/${userId}/profile`, title: user ? `@${user.name}` : name },
-          el('span', { class: 'rk-best-face' },
-            ui.thumb(Rk.thumb('AvatarHeadShot', userId, '150x150'), { size: 84, round: true }),
-            el('span', { class: 'rk-best-dot', dataset: { state } })
-          ),
-          el('span', { class: 'rk-best-name' }, el('span', null, name), mark(isVerified(userId, user && user.hasVerifiedBadge))),
-          el('span', { class: 'rk-best-status', dataset: { state } }, status)
-        );
-      });
-      const section = ui.section(`Best friends (${ids.length})`, el('div', { class: 'rk-friends-best' }, cards), { className: 'rk-friends-best-section' });
-      Rk.observe(CARD, card => {
-        if (section.isConnected || card.closest('.rk-friends-best-section')) return;
-        const list = card.closest('ul, ol') || card.parentElement;
-        if (!list || !list.parentElement) return;
-        let block = list;
-        for (let depth = 0; depth < 4 && block.parentElement; depth += 1) {
-          if (block.querySelector(':scope > .container-header, :scope > h1, :scope > h2, :scope > h3')) break;
-          block = block.parentElement;
+      const followTab = () => /follow/i.test(location.hash);
+      const grid = el('div', { class: 'rk-friends-best' });
+      const section = ui.section('Best friends', grid, { className: 'rk-friends-best-section' });
+      const heading = section.querySelector('.rk-section-title');
+      const render = async () => {
+        const ids = bestList();
+        heading.textContent = ids.length ? `Best friends (${ids.length})` : 'Best friends';
+        if (!ids.length) {
+          grid.replaceChildren(el('div', { class: 'rk-best-empty' }, 'Click the heart on a friend to pin them here'));
+          return;
         }
-        if (!block.querySelector(':scope > .container-header, :scope > h1, :scope > h2, :scope > h3')) block = list;
-        block.before(section);
+        const [users, presence] = await Promise.all([safe(Rk.api.users(ids)), presenceOf(ids)]);
+        if (bestList().join() !== ids.join()) return;
+        grid.replaceChildren(...ids.map(userId => {
+          const user = users && users.get(userId);
+          const entry = presence.get(userId);
+          const state = states[presenceType(entry)] || 'offline';
+          const where = entry && typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : '';
+          const status = { online: 'Online', game: where || 'In game', studio: where ? `Studio: ${where}` : 'In Studio', offline: 'Offline' }[state];
+          const name = user ? String(user.displayName || user.name) : `User ${userId}`;
+          return el('a', { class: 'rk-best-card', href: `/users/${userId}/profile`, title: user ? `@${user.name}` : name },
+            el('span', { class: 'rk-best-face' },
+              ui.thumb(Rk.thumb('AvatarHeadShot', userId, '150x150'), { size: 84, round: true }),
+              el('span', { class: 'rk-best-dot', dataset: { state } })
+            ),
+            el('span', { class: 'rk-best-name' }, el('span', null, name), mark(isVerified(userId, user && user.hasVerifiedBadge))),
+            el('span', { class: 'rk-best-status', dataset: { state } }, status)
+          );
+        }));
+      };
+      const syncHearts = () => {
+        const best = new Set(bestList());
+        const hidden = followTab();
+        section.classList.toggle('rk-hidden', hidden);
+        for (const card of friendCards()) {
+          if (card.closest('.rk-friends-best-section')) continue;
+          const userId = userIdNear(card);
+          const target = card.querySelector('.avatar-card-container') || card;
+          let heart = target.querySelector(':scope > .rk-friends-heart');
+          if (!userId || hidden) {
+            if (heart) heart.remove();
+            continue;
+          }
+          if (!heart) {
+            heart = el('button', { type: 'button', class: 'rk-friends-heart' }, icon('heart', 16));
+            heart.addEventListener('click', async event => {
+              event.preventDefault();
+              event.stopPropagation();
+              const id = Number(heart.dataset.userId);
+              const list = bestList();
+              if (list.includes(id)) {
+                Rk.store.set('friends.best', list.filter(item => item !== id));
+              } else {
+                if (list.length >= 50) return ui.toast('You can have up to 50 best friends', { tone: 'warning' });
+                const friends = await friendsAmong([id]);
+                if (!friends || !friends.has(id)) return ui.toast('Only friends can be best friends', { tone: 'warning' });
+                Rk.store.set('friends.best', [id, ...bestList().filter(item => item !== id)]);
+              }
+              syncHearts();
+              render();
+            });
+            target.classList.add('rk-friends-heartable');
+            target.append(heart);
+          }
+          const on = best.has(userId);
+          if (heart.dataset.userId !== String(userId)) heart.dataset.userId = String(userId);
+          if (heart.getAttribute('aria-pressed') !== String(on)) {
+            heart.setAttribute('aria-pressed', String(on));
+            heart.setAttribute('aria-label', on ? 'Remove from best friends' : 'Add to best friends');
+            heart.title = on ? 'Remove from best friends' : 'Add to best friends';
+          }
+        }
+      };
+      let queued = false;
+      const schedule = () => {
+        if (queued) return;
+        queued = true;
+        queueMicrotask(() => {
+          queued = false;
+          syncHearts();
+        });
+      };
+      const watched = new WeakSet();
+      Rk.observe(CARD, card => {
+        if (card.closest('.rk-friends-best-section')) return;
+        const list = card.closest('ul, ol') || card.parentElement;
+        if (list && !section.isConnected && list.parentElement) {
+          const bar = list.previousElementSibling && list.previousElementSibling.classList.contains('rk-friends-bar') ? list.previousElementSibling : null;
+          (bar || list).before(section);
+        }
+        if (list && !watched.has(list)) {
+          watched.add(list);
+          new MutationObserver(schedule).observe(list, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['href'] });
+        }
+        schedule();
       });
+      window.addEventListener('hashchange', schedule);
+      await prune();
+      render();
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.quickUnfriend',
+    category: 'profiles',
+    name: 'Quick unfriend',
+    description: 'Adds an unfriend button to the cards on your friends list.',
+    default: false,
+    pages: FRIENDS,
+    css: `
+.rk-friends-unfriendable { position: relative; }
+.rk-friends-unfriend { position: absolute; bottom: 10px; left: 10px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: var(--rk-shift); color: var(--rk-muted); font-family: var(--rk-font); font-size: 12px; font-weight: 600; cursor: pointer; opacity: 0; transition: opacity var(--rk-fast) ease, color var(--rk-fast) ease, background-color var(--rk-fast) ease; }
+.rk-friends-unfriendable:hover > .rk-friends-unfriend, .rk-friends-unfriend:focus-visible { opacity: 1; }
+.rk-friends-unfriend:hover { background: var(--rk-danger-soft); color: var(--rk-danger); }
+.rk-friends-unfriend[disabled] { opacity: 0.5; pointer-events: none; }
+[data-rk-unfriended] { display: none !important; }
+`,
+    async run(ctx) {
+      if (!await ownFriendsPage()) return;
+      const sync = () => {
+        const hidden = /follow/i.test(location.hash) || !Rk.isEnabled(ctx.id);
+        for (const card of friendCards()) {
+          if (card.closest('.rk-friends-best-section')) continue;
+          const userId = userIdNear(card);
+          const target = card.querySelector('.avatar-card-container') || card;
+          let button = target.querySelector(':scope > .rk-friends-unfriend');
+          if (!userId || hidden) {
+            if (button) button.remove();
+            continue;
+          }
+          if (!button) {
+            button = el('button', { type: 'button', class: 'rk-friends-unfriend' }, icon('close', 12), 'Unfriend');
+            button.addEventListener('click', async event => {
+              event.preventDefault();
+              event.stopPropagation();
+              const id = Number(button.dataset.userId);
+              const name = button.dataset.name || 'this friend';
+              const confirmed = await ui.confirm(`${name} will be removed from your friends.`, { title: 'Unfriend', confirmLabel: 'Unfriend', danger: true });
+              if (!confirmed) return;
+              button.disabled = true;
+              const result = await safe(Rk.api.post(`https://friends.roblox.com/v1/users/${id}/unfriend`, {}));
+              button.disabled = false;
+              if (!result) return ui.toast('Could not unfriend', { tone: 'danger' });
+              const item = button.closest('li') || button.closest('.avatar-card') || target;
+              item.setAttribute('data-rk-unfriended', '');
+              const best = Rk.store.get('friends.best', []);
+              if (Array.isArray(best) && best.map(Number).includes(id)) Rk.store.set('friends.best', best.map(Number).filter(item => item !== id));
+              ui.toast(`Unfriended ${name}`, { tone: 'success' });
+            });
+            target.classList.add('rk-friends-unfriendable');
+            target.append(button);
+          }
+          const nameNode = card.querySelector('.avatar-name, .avatar-card-label');
+          button.dataset.name = nameNode ? nameNode.textContent.trim().slice(0, 60) : '';
+          if (button.dataset.userId !== String(userId)) {
+            button.dataset.userId = String(userId);
+            const item = button.closest('li') || target;
+            item.removeAttribute('data-rk-unfriended');
+          }
+        }
+      };
+      let queued = false;
+      const schedule = () => {
+        if (queued) return;
+        queued = true;
+        queueMicrotask(() => {
+          queued = false;
+          sync();
+        });
+      };
+      const watched = new WeakSet();
+      Rk.observe(CARD, card => {
+        const list = card.closest('ul, ol') || card.parentElement;
+        if (list && !watched.has(list)) {
+          watched.add(list);
+          new MutationObserver(schedule).observe(list, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['href'] });
+        }
+        schedule();
+      });
+      window.addEventListener('hashchange', schedule);
+      Rk.onSettings(schedule);
     }
   });
 
