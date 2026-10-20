@@ -197,11 +197,29 @@ const syncMusic = async () => {
   return result ? result.state : 'unavailable';
 };
 
-const notify = (title, message, url, sound) => {
+const userIcons = new Map();
+
+const userIcon = async userId => {
+  if (!Number.isSafeInteger(userId) || userId <= 0) return null;
+  if (userIcons.has(userId)) return userIcons.get(userId);
+  const json = await robloxRequest(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`).catch(() => null);
+  const entry = json && Array.isArray(json.data) ? json.data[0] : null;
+  const src = entry && entry.state === 'Completed' && typeof entry.imageUrl === 'string' ? entry.imageUrl : null;
+  if (!src || !/^https:\/\/[a-z0-9.-]+\.rbxcdn\.com\//i.test(src)) return null;
+  const response = await fetch(src, { credentials: 'omit' }).catch(() => null);
+  if (!response || !response.ok) return null;
+  const data = `data:image/png;base64,${encodeBytes(await response.arrayBuffer())}`;
+  userIcons.set(userId, data);
+  if (userIcons.size > 100) userIcons.delete(userIcons.keys().next().value);
+  return data;
+};
+
+const notify = async (title, message, url, sound, iconUserId) => {
   const id = `rk|${Date.now()}|${isRobloxUrl(url) ? url : 'https://www.roblox.com/home'}`;
+  const icon = iconUserId ? await userIcon(iconUserId).catch(() => null) : null;
   chrome.notifications.create(id, {
     type: 'basic',
-    iconUrl: NOTIFY_ICON,
+    iconUrl: icon || NOTIFY_ICON,
     title: cleanText(title, 80),
     message: cleanText(message, 200),
     priority: 0,
@@ -245,7 +263,7 @@ const pollFriends = async (userId, state) => {
   for (const entry of cameOnline.slice(0, 5)) {
     const name = names.get(entry.userId) || 'A friend';
     const playing = entry.userPresenceType === 2 && entry.lastLocation ? `Playing ${entry.lastLocation}` : 'Now online';
-    notify(name, playing, `https://www.roblox.com/users/${entry.userId}/profile`);
+    notify(name, playing, `https://www.roblox.com/users/${entry.userId}/profile`, undefined, entry.userId);
   }
   if (cameOnline.length > 5) notify('Friends online', `${cameOnline.length - 5} more friends came online`, 'https://www.roblox.com/users/friends');
 };
@@ -317,7 +335,7 @@ const pollUnfriends = async (userId, state) => {
   await chrome.storage.local.set({ [UNFRIENDS_KEY]: [...entries, ...(Array.isArray(log) ? log : [])].slice(0, 100) });
   for (const entry of entries.slice(0, 5)) {
     const name = entry.displayName || `User ${entry.userId}`;
-    notify(entry.banned ? 'Friend removed' : 'Unfriended', entry.banned ? `${name} is no longer your friend, their account was banned or deleted` : `${name} unfriended you`, `https://www.roblox.com/users/${entry.userId}/profile`);
+    notify(entry.banned ? 'Friend removed' : 'Unfriended', entry.banned ? `${name} is no longer your friend, their account was banned or deleted` : `${name} unfriended you`, `https://www.roblox.com/users/${entry.userId}/profile`, undefined, entry.userId);
   }
   if (entries.length > 5) notify('Unfriended', `${entries.length - 5} more people are no longer your friends`, 'https://www.roblox.com/users/friends');
 };
@@ -358,10 +376,10 @@ const pollWatched = async (settings, state) => {
     const before = previous[entry.userId];
     if (!before) continue;
     const url = `https://www.roblox.com/users/${entry.userId}/profile`;
-    if (now.type === 2 && (before.type !== 2 || before.place !== now.place)) notify(user.name, entry.lastLocation ? `Joined ${cleanText(entry.lastLocation, 120)}` : 'Joined a game', url);
-    else if (now.type === 0 && before.type !== 0) notify(user.name, 'Went offline', url);
-    else if (now.type === 1 && before.type === 0) notify(user.name, 'Came online', url);
-    else if (now.type === 1 && before.type === 2) notify(user.name, 'Left their game', url);
+    if (now.type === 2 && (before.type !== 2 || before.place !== now.place)) notify(user.name, entry.lastLocation ? `Joined ${cleanText(entry.lastLocation, 120)}` : 'Joined a game', url, undefined, user.id);
+    else if (now.type === 0 && before.type !== 0) notify(user.name, 'Went offline', url, undefined, user.id);
+    else if (now.type === 1 && before.type === 0) notify(user.name, 'Came online', url, undefined, user.id);
+    else if (now.type === 1 && before.type === 2) notify(user.name, 'Left their game', url, undefined, user.id);
   }
   state.watch = next;
 };
@@ -490,8 +508,8 @@ const pollTerms = async (settings, data, state) => {
       const before = previous[user.id];
       if (before && typeof before.banned === 'boolean' && before.banned !== banned) {
         log.unshift({ userId: user.id, name: entry.name, displayName: entry.displayName, event: banned ? 'terminated' : 'returned', time: now });
-        if (banned) notify(`${entry.displayName} was terminated`, `@${entry.name} is no longer on Roblox`, `https://www.roblox.com/users/${user.id}/profile`, sound ? { assetId: sound } : undefined);
-        else notify(`${entry.displayName} is back`, `@${entry.name} is no longer terminated`, `https://www.roblox.com/users/${user.id}/profile`, sound ? { assetId: sound } : undefined);
+        if (banned) notify(`${entry.displayName} was terminated`, `@${entry.name} is no longer on Roblox`, `https://www.roblox.com/users/${user.id}/profile`, sound ? { assetId: sound } : undefined, user.id);
+        else notify(`${entry.displayName} is back`, `@${entry.name} is no longer terminated`, `https://www.roblox.com/users/${user.id}/profile`, sound ? { assetId: sound } : undefined, user.id);
       }
       users[user.id] = entry;
     }
