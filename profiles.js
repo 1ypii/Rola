@@ -536,6 +536,41 @@ button.rk-profile-chip:active { transform: scale(0.97); }
   });
 
   Rk.feature({
+    id: 'profiles.report',
+    category: 'profiles',
+    name: 'Report to Rola',
+    description: 'Adds a Report button to profiles so you can tell Rola admins about bad banners, scammers and other problems.',
+    pages: PROFILE,
+    css: headerCss,
+    async run() {
+      const id = profileId();
+      if (!id || await ownProfile()) return;
+      const send = () => {
+        const reason = ui.select([['banner', 'Bad profile banner'], ['scam', 'Scamming'], ['harassment', 'Harassment'], ['inappropriate', 'Inappropriate'], ['other', 'Other']], 'banner');
+        const details = el('textarea', { class: 'rk-input rk-admin-textarea', placeholder: 'What happened? (optional)', maxlength: '500' });
+        const submit = ui.button('Send report', { variant: 'primary', onClick: async () => {
+          submit.disabled = true;
+          try {
+            await Rk.bg('report-user', { userId: id, reason: reason.value, details: details.value });
+            handle.close();
+            ui.toast('Report sent to the Rola admins', { tone: 'success' });
+          } catch (err) {
+            submit.disabled = false;
+            ui.toast(`Could not send the report: ${err && err.message ? err.message : 'unknown error'}`, { tone: 'danger', duration: 7000 });
+          }
+        } });
+        const handle = ui.modal({
+          title: 'Report to Rola',
+          width: 420,
+          content: [el('p', { class: 'rk-modal-text' }, 'This goes to the Rola admins, not Roblox. For rule breaking on Roblox itself, use the Roblox report button too.'), reason, details],
+          actions: [ui.button('Cancel', { variant: 'secondary', onClick: () => handle.close() }), submit]
+        });
+      };
+      addTool(ui.button('Report', { icon: 'flag', onClick: send }), 20);
+    }
+  });
+
+  Rk.feature({
     id: 'profiles.notes',
     category: 'profiles',
     name: 'Profile notes',

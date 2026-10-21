@@ -926,11 +926,58 @@
         try {
           sessionStorage.removeItem('rk-admin');
         } catch {}
+        Rk.bg('admin-logout').catch(() => {});
         syncAdminUi();
         showLogin();
       };
+      const reasons = { banner: 'Bad profile banner', scam: 'Scamming', harassment: 'Harassment', inappropriate: 'Inappropriate', other: 'Other' };
+      const showReports = async () => {
+        results.replaceChildren(ui.spinner(20));
+        let reports;
+        try {
+          reports = await Rk.bg('reports');
+        } catch (err) {
+          const message = err && err.message ? err.message : 'unknown error';
+          results.replaceChildren(el('div', { class: 'rk-admin-empty' }, message === 'admins only' ? 'Sign out and back in to load reports. If it still fails, ask the owner to save your admin account again.' : `Could not load reports: ${message}`));
+          return;
+        }
+        reportsButton.textContent = 'Reports';
+        const resolve = async ids => {
+          try {
+            await Rk.bg('resolve-reports', { ids });
+            showReports();
+          } catch (err) {
+            ui.toast(`Could not resolve: ${err && err.message ? err.message : 'unknown error'}`, { tone: 'danger' });
+          }
+        };
+        const names = new Map();
+        const ids = [...new Set(reports.flatMap(report => [Number(report.userId), Number(report.reporterId)]))].filter(Rk.isId);
+        if (ids.length) {
+          const json = await Rk.api.post('https://users.roblox.com/v1/users', { userIds: ids.slice(0, 100), excludeBannedUsers: false }).catch(() => null);
+          for (const user of json && Array.isArray(json.data) ? json.data : []) names.set(String(user.id), user.name);
+        }
+        const person = id => el('a', { href: `/users/${id}/profile`, target: '_blank' }, names.get(String(id)) || String(id));
+        const rows = reports.map(report => [
+          person(report.userId),
+          el('span', null, reasons[report.reason] || report.reason, report.details ? el('div', { class: 'rk-admin-empty' }, report.details) : null),
+          el('span', null, person(report.reporterId), report.verified ? null : el('span', { class: 'rk-admin-tag', title: 'This reporter has not linked their account, the name could be faked' }, 'Unlinked')),
+          adminDate(report.at),
+          el('span', { class: 'rk-inline' },
+            ui.button('Look up', { variant: 'ghost', onClick: async () => {
+              results.replaceChildren(ui.spinner(20));
+              results.replaceChildren(await adminProfile(Number(report.userId)));
+            } }),
+            ui.button('Resolve', { variant: 'ghost', onClick: () => resolve([report.id]) })
+          )
+        ]);
+        results.replaceChildren(adminCard(`Reports (${reports.length})`,
+          adminTable(['User', 'Reason', 'Reported by', 'Date', ''], rows),
+          reports.length > 1 ? ui.button('Resolve all', { variant: 'ghost', onClick: () => resolve(reports.map(report => report.id)) }) : null
+        ));
+      };
+      const reportsButton = ui.button('Reports', { variant: 'ghost', onClick: showReports });
       adminNode.replaceChildren(
-        el('div', { class: 'rk-admin-search' }, field, ui.button('Search', { variant: 'primary', onClick: lookup }), ui.button('Sign out', { variant: 'ghost', onClick: signOut })),
+        el('div', { class: 'rk-admin-search' }, field, ui.button('Search', { variant: 'primary', onClick: lookup }), reportsButton, ui.button('Sign out', { variant: 'ghost', onClick: signOut })),
         results
       );
     };
@@ -953,6 +1000,8 @@
         try {
           sessionStorage.setItem('rk-admin', entry.username);
         } catch {}
+        Rk.bg('admin-login', { username: entry.username, password: pass.value }).catch(() => ui.toast('Signed in, but reports and bans need the owner to save your admin account again once', { tone: 'warning', duration: 8000 }));
+        pass.value = '';
         syncAdminUi();
         showPanel();
       };
@@ -984,7 +1033,7 @@
         try {
           const salt = [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, '0')).join('');
           const hash = remove ? '' : await adminHash(salt, pass.value);
-          await Rk.bg('save-admin', { username: name, salt, hash, token: token.value, remove });
+          await Rk.bg('save-admin', { username: name, salt, hash, token: token.value, password: remove ? '' : pass.value, remove });
           ui.toast(remove ? `Removed ${name} from the admins` : `Saved ${name}, they can sign in within a few minutes`, { tone: 'success' });
           pass.value = '';
           token.value = '';

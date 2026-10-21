@@ -275,7 +275,8 @@ const isOn = (settings, id) => Boolean(settings && settings.enabled && settings.
 
 const syncAlarm = async () => {
   const settings = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
-  const wanted = ALERT_FEATURES.some(id => isOn(settings, id));
+  const admin = await chrome.storage.local.get(['rk:admin-token', 'rk:gh-token']);
+  const wanted = ALERT_FEATURES.some(id => isOn(settings, id)) || Boolean(admin['rk:admin-token'] || admin['rk:gh-token']);
   const existing = await chrome.alarms.get(POLL_ALARM);
   if (wanted && !existing) {
     chrome.alarms.create(POLL_ALARM, { periodInMinutes: 1, delayInMinutes: 0.1 });
@@ -964,6 +965,45 @@ const syncToken = async userId => {
   return typeof token === 'string' && /^[0-9a-f]{64}$/.test(token) ? token : null;
 };
 
+const adminHeaders = async () => {
+  const saved = await chrome.storage.local.get(['rk:admin-token', 'rk:gh-token']);
+  const headers = {};
+  if (typeof saved['rk:admin-token'] === 'string') headers['x-rola-admin'] = saved['rk:admin-token'];
+  if (typeof saved['rk:gh-token'] === 'string') headers['x-github-token'] = saved['rk:gh-token'];
+  return headers;
+};
+
+const adminRequest = async (path, { method = 'GET', body } = {}) => {
+  const headers = await adminHeaders();
+  if (!Object.keys(headers).length) throw new Error('admins only');
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  const response = await fetch(`${SYNC_URL}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: 'omit' });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data && data.error ? data.error : `rola sync answered ${response.status}`);
+  return data;
+};
+
+const REPORTS_SEEN_KEY = 'rkbg:reports-seen';
+const REPORT_REASONS = { banner: 'Bad profile banner', scam: 'Scamming', harassment: 'Harassment', inappropriate: 'Inappropriate', other: 'Other' };
+
+const pollReports = async () => {
+  const saved = await chrome.storage.local.get(['rk:admin-token', 'rk:gh-token', REPORTS_SEEN_KEY]);
+  if (!saved['rk:admin-token'] && !saved['rk:gh-token']) return;
+  const data = await adminRequest('/api/reports').catch(() => null);
+  if (!data || !Array.isArray(data.reports)) return;
+  const seen = new Set(Array.isArray(saved[REPORTS_SEEN_KEY]) ? saved[REPORTS_SEEN_KEY] : []);
+  const fresh = data.reports.filter(report => !seen.has(report.id));
+  if (!fresh.length) return;
+  if (fresh.length === 1) {
+    const report = fresh[0];
+    const userId = Number(report.userId);
+    notify('New Rola report', `${REPORT_REASONS[report.reason] || 'Report'}${report.details ? `: ${report.details.slice(0, 120)}` : ''}`, `https://www.roblox.com/users/${userId}/profile`, false, Number.isSafeInteger(userId) ? { user: userId } : null);
+  } else {
+    notify('New Rola reports', `${fresh.length} reports are waiting in the admin panel`, 'https://www.roblox.com/home', false, null);
+  }
+  await chrome.storage.local.set({ [REPORTS_SEEN_KEY]: data.reports.map(report => report.id).slice(0, 300) });
+};
+
 const checkSyncUser = userId => {
   if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad user id');
 };
@@ -1070,22 +1110,44 @@ const handlers = {
   },
   'save-ban': async ({ userId, duration, reason, remove } = {}) => {
     if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad ban request');
-    const token = (await chrome.storage.local.get('rk:gh-token'))['rk:gh-token'];
-    if (typeof token !== 'string' || !token) throw new Error('missing token');
     if (!remove && !['day', 'three', 'week', 'termination'].includes(duration)) throw new Error('bad duration');
-    const response = await fetch(`${SYNC_URL}/api/bans`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-github-token': token },
-      credentials: 'omit',
-      body: JSON.stringify({ userId, duration, reason: flagText(reason, 300), remove: Boolean(remove) })
-    });
-    const json = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(json && json.error ? json.error : `rola sync answered ${response.status}`);
+    const json = await adminRequest('/api/bans', { method: 'PUT', body: { userId, duration, reason: flagText(reason, 300), remove: Boolean(remove) } });
     const users = cleanBans(json && json.users);
     banCache = { at: Date.now(), users };
     return users[userId] || null;
   },
-  'save-admin': async ({ username, salt, hash, token, remove } = {}) => {
+  'report-user': async ({ userId, reason, details } = {}) => {
+    checkSyncUser(userId);
+    if (!REPORT_REASONS[reason]) throw new Error('pick a reason');
+    const me = await currentUserId();
+    if (!me) throw new Error('sign in to Roblox first');
+    const token = await syncToken(me);
+    return syncRequest('/api/reports', { method: 'POST', token, body: { userId, reporterId: me, reason, details: flagText(details, 500) } });
+  },
+  'admin-login': async ({ username, password } = {}) => {
+    if (typeof username !== 'string' || typeof password !== 'string') throw new Error('wrong username or password');
+    const { token } = await syncRequest('/api/admin/login', { method: 'POST', body: { username, password } });
+    await chrome.storage.local.set({ 'rk:admin-token': token });
+    syncAlarm();
+    return true;
+  },
+  'admin-logout': async () => {
+    await chrome.storage.local.remove('rk:admin-token');
+    syncAlarm();
+    return true;
+  },
+  reports: async () => {
+    const data = await adminRequest('/api/reports');
+    const reports = Array.isArray(data.reports) ? data.reports : [];
+    await chrome.storage.local.set({ [REPORTS_SEEN_KEY]: reports.map(report => report.id).slice(0, 300) });
+    return reports;
+  },
+  'resolve-reports': async ({ ids } = {}) => {
+    if (!Array.isArray(ids) || !ids.length) throw new Error('missing report');
+    const data = await adminRequest('/api/reports/resolve', { method: 'POST', body: { ids: ids.filter(id => typeof id === 'string').slice(0, 300) } });
+    return Array.isArray(data.reports) ? data.reports : [];
+  },
+  'save-admin': async ({ username, salt, hash, token, password, remove } = {}) => {
     const name = typeof username === 'string' ? username.trim().slice(0, 40) : '';
     if (!/^[A-Za-z0-9_.-]{2,40}$/.test(name)) throw new Error('pick a username with letters, numbers, dots, dashes or underscores');
     if (typeof token === 'string' && token.trim()) {
@@ -1102,6 +1164,7 @@ const handlers = {
     }
     await writeRepoFile('admins.json', file, { admins });
     adminCache = null;
+    await adminRequest('/api/admin/set', { method: 'POST', body: remove ? { username: name, remove: true } : { username: name, password } });
     return admins.map(entry => entry.username);
   },
   'save-flag': payload => saveFlag(payload || {}),
@@ -1169,7 +1232,9 @@ chrome.notifications.onClicked.addListener(id => {
 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === POLL_ALARM) poll();
+  if (alarm.name !== POLL_ALARM) return;
+  poll();
+  pollReports().catch(() => {});
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
