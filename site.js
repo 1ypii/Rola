@@ -385,14 +385,15 @@
         display: inline-flex;
         align-items: center;
         gap: 2px;
-        margin-left: 4px;
+        margin-left: 5px;
+        font-size: 11px;
         font-weight: 400;
         white-space: nowrap;
-        opacity: 0.75;
+        opacity: 0.7;
       }
       .rk-site-pending .rk-icon {
-        width: 14px;
-        height: 14px;
+        width: 11px;
+        height: 11px;
       }
     `,
     run(ctx) {
@@ -424,7 +425,7 @@
             label.remove();
             return;
           }
-          label.replaceChildren('(', icon('robux', 14), `+ ${short(value)} pending)`);
+          label.replaceChildren('+', icon('robux', 11), `${short(value)} pending`);
           label.title = `${full.format(value)} pending Robux`;
           if (label.previousElementSibling !== node) node.after(label);
         };
