@@ -917,7 +917,51 @@
       pass.addEventListener('keydown', event => {
         if (event.key === 'Enter') submit();
       });
-      adminNode.replaceChildren(adminCard('Sign in', el('div', { class: 'rk-admin-empty' }, 'Admin accounts are given out by the Rola owner.'), user, pass, button));
+      adminNode.replaceChildren(
+        adminCard('Sign in', el('div', { class: 'rk-admin-empty' }, 'Admin accounts are given out by the Rola owner.'), user, pass, button),
+        el('div', { class: 'rk-admin-search' }, ui.button('Add or remove an admin', { variant: 'ghost', onClick: showManage }))
+      );
+    };
+    const showManage = () => {
+      const user = ui.input({ placeholder: 'Admin username', maxLength: 40 });
+      const pass = ui.input({ type: 'password', placeholder: 'Their password (12+ characters)', maxLength: 200 });
+      const token = ui.input({ type: 'password', placeholder: 'GitHub token (only needed the first time)', maxLength: 300 });
+      const run = async remove => {
+        const name = user.value.trim();
+        if (!name) {
+          ui.toast('Type the admin username', { tone: 'warning' });
+          return;
+        }
+        if (!remove && pass.value.length < 12) {
+          ui.toast('Use a password of at least 12 characters, the admin list is public', { tone: 'warning' });
+          return;
+        }
+        save.disabled = true;
+        drop.disabled = true;
+        try {
+          const salt = [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+          const hash = remove ? '' : await adminHash(salt, pass.value);
+          await Rk.bg('save-admin', { username: name, salt, hash, token: token.value, remove });
+          ui.toast(remove ? `Removed ${name} from the admins` : `Saved ${name}, they can sign in within a few minutes`, { tone: 'success' });
+          pass.value = '';
+          token.value = '';
+        } catch (err) {
+          const message = err && err.message ? err.message : 'unknown error';
+          ui.toast(message === 'missing token' ? 'Paste your GitHub token the first time' : `Could not save: ${message}`, { tone: 'danger', duration: 7000 });
+        }
+        save.disabled = false;
+        drop.disabled = false;
+      };
+      const save = ui.button('Save admin', { variant: 'primary', onClick: () => run(false) });
+      const drop = ui.button('Remove admin', { variant: 'ghost', onClick: () => run(true) });
+      drop.classList.add('rk-settings-reset');
+      adminNode.replaceChildren(adminCard('Add or remove an admin',
+        el('div', { class: 'rk-admin-empty' }, 'Only the Rola owner can do this. Rola saves the account to admins.json on GitHub with your GitHub token, the same token the Rola Badges card uses. Saving an existing username changes its password.'),
+        user,
+        pass,
+        token,
+        el('div', { class: 'rk-inline' }, save, drop, ui.button('Back', { variant: 'ghost', onClick: showLogin }))
+      ));
     };
     if (adminSession()) showPanel();
     else showLogin();

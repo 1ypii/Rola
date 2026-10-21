@@ -975,6 +975,25 @@ const handlers = {
   'rola-badges': () => rolaBadges(),
   flagged: () => flaggedUsers(),
   admins: () => adminAccounts(),
+  'save-admin': async ({ username, salt, hash, token, remove } = {}) => {
+    const name = typeof username === 'string' ? username.trim().slice(0, 40) : '';
+    if (!/^[A-Za-z0-9_.-]{2,40}$/.test(name)) throw new Error('pick a username with letters, numbers, dots, dashes or underscores');
+    if (typeof token === 'string' && token.trim()) {
+      if (!/^[A-Za-z0-9_]{20,255}$/.test(token.trim())) throw new Error('that does not look like a GitHub token');
+      await chrome.storage.local.set({ 'rk:gh-token': token.trim() });
+    }
+    const saved = (await chrome.storage.local.get('rk:gh-token'))['rk:gh-token'];
+    if (typeof saved !== 'string' || !saved) throw new Error('missing token');
+    const file = await repoFile('admins.json', saved);
+    const admins = (Array.isArray(file.data.admins) ? file.data.admins : []).filter(entry => entry && typeof entry.username === 'string' && entry.username.toLowerCase() !== name.toLowerCase());
+    if (!remove) {
+      if (!/^[0-9a-f]{32}$/.test(salt) || !/^[0-9a-f]{64}$/.test(hash)) throw new Error('bad password data');
+      admins.push({ username: name, salt, hash });
+    }
+    await writeRepoFile('admins.json', file, { admins });
+    adminCache = null;
+    return admins.map(entry => entry.username);
+  },
   'save-flag': payload => saveFlag(payload || {}),
   'save-badges': payload => saveBadges(payload || {}),
   'server-region': payload => serverRegion(payload || {}),
