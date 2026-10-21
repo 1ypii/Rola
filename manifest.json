@@ -31,7 +31,8 @@
   ],
   "host_permissions": [
     "https://*.roblox.com/*",
-    "https://api.rolimons.com/*"
+    "https://api.rolimons.com/*",
+    "https://robloxverifieds.com/*"
   ],
   "content_scripts": [
     {

@@ -2181,18 +2181,167 @@
     return (json && Array.isArray(json.data) ? json.data : []).filter(outfit => outfit && Rk.isId(outfit.id)).slice(0, 50);
   };
 
+  const applyAvatar = async (assets, { bodyColors, playerAvatarType, scale } = {}) => {
+    const result = await Rk.api.post('https://avatar.roblox.com/v2/avatar/set-wearing-assets', { assets: assets.map(asset => (isObject(asset.meta) ? { id: Number(asset.id), meta: asset.meta } : { id: Number(asset.id) })) });
+    if (isObject(result) && result.success === false) throw new Error('wear rejected');
+    await Promise.allSettled([
+      isObject(bodyColors) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-body-colors', bodyColors) : null,
+      typeof playerAvatarType === 'string' ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType }) : null,
+      isObject(scale) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-scales', scale) : null
+    ]);
+  };
+
   const wearOutfit = async outfit => {
     const details = await Rk.api.get(`https://avatar.roblox.com/v1/outfits/${outfit.id}/details`);
     const assets = isObject(details) && Array.isArray(details.assets) ? details.assets.filter(asset => isObject(asset) && Rk.isId(asset.id)) : null;
     if (!assets) throw new Error('unexpected outfit data');
-    const result = await Rk.api.post('https://avatar.roblox.com/v2/avatar/set-wearing-assets', { assets: assets.map(asset => (isObject(asset.meta) ? { id: Number(asset.id), meta: asset.meta } : { id: Number(asset.id) })) });
-    if (isObject(result) && result.success === false) throw new Error('wear rejected');
-    await Promise.allSettled([
-      isObject(details.bodyColors) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-body-colors', details.bodyColors) : null,
-      typeof details.playerAvatarType === 'string' ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType: details.playerAvatarType }) : null,
-      isObject(details.scale) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-scales', details.scale) : null
-    ]);
+    await applyAvatar(assets, details);
   };
+
+  const copyCss = `
+    .rk-copy-outfit-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain; }
+    .rk-copy-outfit-item { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-top: 1px solid var(--rk-border); }
+    .rk-copy-outfit-item:first-child { border-top: 0; }
+    .rk-copy-outfit-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+    .rk-copy-outfit-name { overflow: hidden; color: var(--rk-text-strong) !important; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+    .rk-copy-outfit-type { font-size: 12px; color: var(--rk-muted); }
+    .rk-copy-outfit-owned { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--rk-success); }
+    .rk-copy-outfit-total { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rk-border); font-weight: 700; color: var(--rk-text-strong); }
+    .rk-copy-outfit-bar { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; margin-top: 12px; }
+  `;
+
+  Rk.feature({
+    id: 'avatar.copyOutfit',
+    category: 'avatar',
+    name: 'Copy outfit',
+    description: 'Adds a Copy outfit button to profiles that shows what they are wearing, what you already own and what the rest costs, and can put the owned pieces on you.',
+    default: false,
+    pages: ['profile'],
+    css: copyCss,
+    async run(ctx) {
+      const userId = Rk.page().id;
+      const me = await Rk.me();
+      if (!Rk.isId(userId) || !me || me.id === userId) return;
+      const owns = async assetId => {
+        const json = await Rk.api.get(`https://inventory.roblox.com/v1/users/${me.id}/items/Asset/${assetId}/is-owned`).catch(() => null);
+        return json === true;
+      };
+      const ownedMap = async ids => {
+        const result = new Map();
+        const queue = [...ids];
+        const worker = async () => {
+          while (queue.length) {
+            const assetId = queue.shift();
+            result.set(assetId, await owns(assetId));
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker));
+        return result;
+      };
+      const priceMap = async ids => {
+        const result = new Map();
+        for (let i = 0; i < ids.length; i += 100) {
+          const json = await Rk.api.post('https://catalog.roblox.com/v1/catalog/items/details', { items: ids.slice(i, i + 100).map(id => ({ itemType: 'Asset', id })) }).catch(() => null);
+          for (const item of isObject(json) && Array.isArray(json.data) ? json.data : []) {
+            if (isObject(item) && Rk.isId(item.id)) result.set(Number(item.id), item);
+          }
+        }
+        return result;
+      };
+      const open = async button => {
+        button.disabled = true;
+        try {
+          const avatar = await Rk.api.get(`https://avatar.roblox.com/v1/users/${userId}/avatar`);
+          const assets = isObject(avatar) && Array.isArray(avatar.assets) ? avatar.assets.filter(asset => isObject(asset) && Rk.isId(asset.id)) : [];
+          if (!assets.length) {
+            ui.toast('They are not wearing any items', { tone: 'warning' });
+            return;
+          }
+          const owned = await ownedMap(assets.map(asset => Number(asset.id)));
+          const prices = await priceMap(assets.filter(asset => !owned.get(Number(asset.id))).map(asset => Number(asset.id)));
+          let total = 0;
+          let missing = 0;
+          const rows = assets.map(asset => {
+            const assetId = Number(asset.id);
+            const name = str(asset.name, 100) || 'Item';
+            const type = isObject(asset.assetType) ? str(asset.assetType.name, 40).replace(/([a-z])([A-Z])/g, '$1 $2') : '';
+            let status;
+            if (owned.get(assetId)) {
+              status = el('span', { class: 'rk-copy-outfit-owned' }, icon('check', 14), 'Owned');
+            } else {
+              missing += 1;
+              const item = prices.get(assetId);
+              const price = item ? num(item.price) : null;
+              const onSale = Boolean(item) && price !== null && !/off ?sale/i.test(String(item.priceStatus || ''));
+              if (onSale && price > 0) total += price;
+              status = onSale ? (price > 0 ? ui.robux(price) : el('span', { class: 'rk-copy-outfit-owned' }, 'Free')) : el('span', { class: 'rk-muted' }, 'Off sale');
+            }
+            return el('div', { class: 'rk-copy-outfit-item' },
+              ui.thumb(Rk.thumb('Asset', assetId, '150x150'), { size: 44, alt: '' }),
+              el('div', { class: 'rk-copy-outfit-text' },
+                el('a', { class: 'rk-copy-outfit-name', href: `/catalog/${assetId}`, target: '_blank', title: name }, name),
+                type ? el('span', { class: 'rk-copy-outfit-type' }, type) : null
+              ),
+              status
+            );
+          });
+          const ownedAssets = assets.filter(asset => owned.get(Number(asset.id)));
+          let handle = null;
+          const wear = async () => {
+            if (!ownedAssets.length) {
+              ui.toast('You do not own any of these items', { tone: 'warning' });
+              return;
+            }
+            const confirmed = await ui.confirm('This replaces what you are wearing right now with the pieces of their outfit you own, plus their body colors, scale and body type.', { title: 'Wear their outfit', confirmLabel: 'Wear' });
+            if (!confirmed) return;
+            try {
+              await applyAvatar(ownedAssets, { bodyColors: avatar.bodyColors, playerAvatarType: avatar.playerAvatarType, scale: avatar.scales });
+              ui.toast(`Put on ${fmt.plural(ownedAssets.length, 'item')}`, { tone: 'success' });
+              if (handle) handle.close();
+            } catch {
+              ui.toast('Could not change your avatar', { tone: 'danger' });
+            }
+          };
+          handle = ui.modal({
+            title: 'Copy outfit',
+            width: 520,
+            content: [
+              el('div', { class: 'rk-copy-outfit-list' }, rows),
+              el('div', { class: 'rk-copy-outfit-total' },
+                el('span', null, missing ? `Cost to complete (${fmt.plural(missing, 'missing item')})` : 'You own everything'),
+                missing ? ui.robux(total) : null
+              )
+            ],
+            actions: [
+              ui.button('Cancel', { variant: 'secondary', size: 'md', onClick: () => handle.close() }),
+              ui.button(`Wear what I own (${ownedAssets.length})`, { variant: 'primary', size: 'md', onClick: wear })
+            ]
+          });
+        } catch {
+          ui.toast('Could not load their outfit', { tone: 'danger' });
+        } finally {
+          button.disabled = false;
+        }
+      };
+      const button = ui.button('Copy outfit', { variant: 'secondary', icon: 'copy' });
+      button.addEventListener('click', () => open(button));
+      Rk.onSettings(() => button.classList.toggle('rk-hidden', !Rk.isEnabled(ctx.id)));
+      Rk.observe('.user-profile-header', header => {
+        if (button.isConnected) return;
+        let bar = header.querySelector(':scope > .rk-profile-toolbar');
+        if (!bar) {
+          bar = el('div', { class: 'rk-profile-toolbar rk-inline rk-copy-outfit-bar', dataset: { rkOrder: '3' } });
+          const next = [...header.children].find(child => Number(child.dataset.rkOrder) > 3);
+          if (next) header.insertBefore(bar, next);
+          else header.append(bar);
+        }
+        button.dataset.rkOrder = '9';
+        const later = [...bar.children].find(child => child !== button && Number(child.dataset.rkOrder) > 9);
+        if (later) bar.insertBefore(button, later);
+        else bar.append(button);
+      });
+    }
+  });
 
   const pinCss = `
     .rk-avatar-pin { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--rk-radius); background: transparent; color: var(--rk-muted); opacity: 0.45; cursor: pointer; transition: opacity var(--rk-fast) ease, background-color var(--rk-fast) ease, color var(--rk-fast) ease; }

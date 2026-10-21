@@ -733,9 +733,46 @@
     return card;
   };
 
+  const FLAG_REASONS = ['Scamming Users', 'Scamming Developers', 'Paid for Verification Badge', 'Selling Verification Badges', 'Doxxing / Harassment', 'Predatory Behaviour Towards Minors', 'Sexual Misconduct', 'Other'];
+
+  const flagCard = (userId, entry) => {
+    const body = el('div', { class: 'rk-admin-card-body' });
+    const card = el('section', { class: 'rk-admin-card' }, el('div', { class: 'rk-admin-card-head' }, 'Rola Flags'), body);
+    let flags = entry && Array.isArray(entry.flags) ? entry.flags : [];
+    const render = () => {
+      const rola = flags.filter(flag => flag.source === 'Rola');
+      const reason = ui.select(FLAG_REASONS.map(item => [item, item]), FLAG_REASONS[0]);
+      const note = el('textarea', { class: 'rk-input rk-admin-textarea', placeholder: 'Why they are flagged, shown to everyone', maxlength: '600' });
+      body.replaceChildren(
+        ...(flags.length ? flags.map(flag => el('div', { class: 'rk-admin-note' },
+          el('span', { class: 'rk-admin-note-date' }, `${flag.source}${flag.at ? ` · ${adminDate(flag.at)}` : ''}`),
+          el('span', { class: 'rk-admin-bad' }, flag.reason),
+          flag.note ? el('span', null, flag.note) : null,
+          flag.source === 'Rola' ? ui.button('Remove', { variant: 'ghost', onClick: () => save({ userId, remove: rola.indexOf(flag) }) }) : null
+        )) : [el('div', { class: 'rk-admin-empty' }, 'Not flagged')]),
+        reason,
+        note,
+        ui.button('Flag user', { variant: 'primary', onClick: () => save({ userId, reason: reason.value, note: note.value }) })
+      );
+    };
+    const save = async payload => {
+      try {
+        const list = await Rk.bg('save-flag', payload);
+        flags = [...flags.filter(flag => flag.source !== 'Rola'), ...(Array.isArray(list) ? list.map(flag => ({ ...flag, source: 'Rola' })) : [])];
+        render();
+        ui.toast('Flags saved, every Rola user sees them within about an hour', { tone: 'success' });
+      } catch (err) {
+        const message = err && err.message ? err.message : 'unknown error';
+        ui.toast(message === 'missing token' ? 'Add your GitHub token in the Rola Badges card first' : `Could not save the flag: ${message}`, { tone: 'danger', duration: 7000 });
+      }
+    };
+    render();
+    return card;
+  };
+
   const adminProfile = async id => {
     const safe = promise => Promise.resolve(promise).catch(() => null);
-    const [user, groups, games, presence, history, friends, followers, following, badges] = await Promise.all([
+    const [user, groups, games, presence, history, friends, followers, following, badges, flagged] = await Promise.all([
       safe(Rk.api.get(`https://users.roblox.com/v1/users/${id}`)),
       safe(Rk.api.get(`https://groups.roblox.com/v2/users/${id}/groups/roles`)),
       safe(Rk.api.get(`https://games.roblox.com/v2/users/${id}/games?accessFilter=Public&limit=50&sortOrder=Desc`)),
@@ -744,7 +781,8 @@
       safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/friends/count`)),
       safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followers/count`)),
       safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followings/count`)),
-      safe(Rk.bg('rola-badges'))
+      safe(Rk.bg('rola-badges')),
+      safe(Rk.bg('flagged'))
     ]);
     if (!user || !Rk.isId(user.id)) return el('div', { class: 'rk-admin-empty' }, 'No user found');
     const entry = presence && Array.isArray(presence.userPresences) ? presence.userPresences[0] : null;
@@ -803,6 +841,7 @@
         adminCard(`Groups (${groupRows.length})`, adminTable(['Group', 'Role', 'Members'], groupRows)),
         adminCard('User Notes', noteField, ui.button('Add Note', { variant: 'primary', onClick: addNote }), noteList),
         badgeCard(user.id, badges && Array.isArray(badges[user.id]) ? badges[user.id] : []),
+        flagCard(user.id, flagged && flagged[user.id]),
         adminCard(`Past Usernames (${names.length})`, names.length ? el('div', { class: 'rk-inline' }, names.map(name => el('span', { class: 'rk-admin-tag' }, name))) : el('div', { class: 'rk-admin-empty' }, 'None'))
       )
     );

@@ -542,6 +542,199 @@
   });
 
   Rk.feature({
+    id: 'site.chatQuickReplies',
+    category: 'site',
+    name: 'Chat quick replies',
+    description: 'Adds a button next to the chat message box with saved replies you can drop in with one click.',
+    default: false,
+    css: `
+      .rk-quick-reply-button {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        margin: 0 4px 2px 0;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--rk-muted);
+        cursor: pointer;
+        transition: background-color var(--rk-fast) ease, color var(--rk-fast) ease;
+      }
+      .rk-quick-reply-button:hover,
+      .rk-quick-reply-button[aria-expanded="true"] {
+        background: var(--rk-hover);
+        color: var(--rk-text-strong);
+      }
+      .rk-quick-replies {
+        width: 220px;
+        max-height: 280px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      .rk-quick-reply-row {
+        display: flex;
+        align-items: center;
+      }
+      .rk-quick-reply-row > .rk-menu-item {
+        flex: 1;
+        min-width: 0;
+      }
+      .rk-quick-reply-row > .rk-menu-item > span {
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .rk-quick-reply-remove {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--rk-radius);
+        background: transparent;
+        color: var(--rk-muted);
+        opacity: 0;
+        cursor: pointer;
+        transition: opacity var(--rk-fast) ease, background-color var(--rk-fast) ease;
+      }
+      .rk-quick-reply-row:hover .rk-quick-reply-remove,
+      .rk-quick-reply-remove:focus-visible {
+        opacity: 1;
+      }
+      .rk-quick-reply-remove:hover {
+        background: var(--rk-hover);
+        color: var(--rk-danger);
+      }
+      .rk-quick-reply-empty {
+        padding: 8px 10px;
+        font-size: 13px;
+        color: var(--rk-muted);
+      }
+    `,
+    run(ctx) {
+      const defaults = ['gg', 'brb', 'one sec', 'join me?', 'on my way'];
+      const fieldSelector = 'textarea, input[type="text"], input:not([type]), [contenteditable="true"]';
+      let close = null;
+      const saved = () => {
+        const list = Rk.store.get('chat.quickReplies', null);
+        if (!Array.isArray(list)) return defaults;
+        return list.filter(text => typeof text === 'string' && text.trim()).map(text => text.trim().slice(0, 300)).slice(0, 30);
+      };
+      const insert = (field, text) => {
+        field.focus();
+        if (field.isContentEditable) {
+          document.execCommand('insertText', false, text);
+          return;
+        }
+        const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+        const start = typeof field.selectionStart === 'number' ? field.selectionStart : field.value.length;
+        const end = typeof field.selectionEnd === 'number' ? field.selectionEnd : field.value.length;
+        const next = field.value.slice(0, start) + text + field.value.slice(end);
+        setter.call(field, next);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        const caret = start + text.length;
+        if (typeof field.setSelectionRange === 'function') field.setSelectionRange(caret, caret);
+      };
+      const open = (button, field) => {
+        if (close) {
+          close();
+          return;
+        }
+        const menu = el('div', { class: 'rk-menu rk-quick-replies', role: 'menu' });
+        const render = () => {
+          const replies = saved();
+          menu.replaceChildren(
+            ...(replies.length ? replies.map((text, index) => {
+              const item = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem', title: text }, el('span', null, text));
+              item.addEventListener('click', () => {
+                insert(field, text);
+                close();
+              });
+              const remove = el('button', { type: 'button', class: 'rk-quick-reply-remove', 'aria-label': `Remove ${text}`, title: 'Remove' }, icon('close', 14));
+              remove.addEventListener('click', event => {
+                event.stopPropagation();
+                Rk.store.set('chat.quickReplies', saved().filter((entry, position) => position !== index));
+                render();
+              });
+              return el('div', { class: 'rk-quick-reply-row' }, item, remove);
+            }) : [el('div', { class: 'rk-quick-reply-empty' }, 'No saved replies yet')]),
+            el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem', onclick: async () => {
+              close();
+              const text = await ui.prompt('Type a reply to keep for later.', { title: 'Add quick reply', maxLength: 300, confirmLabel: 'Add' });
+              const clean = typeof text === 'string' ? text.trim().slice(0, 300) : '';
+              if (!clean) return;
+              const replies = saved();
+              if (replies.length >= 30) {
+                ui.toast('You can keep up to 30 quick replies', { tone: 'warning' });
+                return;
+              }
+              Rk.store.set('chat.quickReplies', [...replies, clean]);
+              ui.toast('Quick reply saved', { tone: 'success' });
+            } }, icon('plus', 16), el('span', null, 'Add reply'))
+          );
+        };
+        const onDown = event => {
+          if (!menu.contains(event.target) && !button.contains(event.target)) close();
+        };
+        const onKey = event => {
+          if (event.key === 'Escape') close();
+        };
+        close = () => {
+          document.removeEventListener('mousedown', onDown, true);
+          document.removeEventListener('keydown', onKey, true);
+          button.setAttribute('aria-expanded', 'false');
+          menu.classList.remove('rk-menu-open');
+          setTimeout(() => menu.remove(), 180);
+          close = null;
+        };
+        render();
+        document.body.append(menu);
+        const rect = button.getBoundingClientRect();
+        menu.style.left = `${Math.max(8, Math.round(rect.left + window.scrollX))}px`;
+        menu.style.top = `${Math.max(8, Math.round(rect.top + window.scrollY - menu.offsetHeight - 6))}px`;
+        button.setAttribute('aria-expanded', 'true');
+        document.addEventListener('mousedown', onDown, true);
+        document.addEventListener('keydown', onKey, true);
+        requestAnimationFrame(() => menu.classList.add('rk-menu-open'));
+      };
+      const attach = shell => {
+        if (shell.querySelector('[data-testid="react-chat-thread-list"]')) return;
+        const field = shell.querySelector(fieldSelector);
+        if (!field || shell.querySelector('.rk-quick-reply-button')) return;
+        const button = el('button', { type: 'button', class: 'rk-quick-reply-button', 'aria-label': 'Quick replies', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: 'Quick replies' }, icon('note', 18));
+        button.addEventListener('click', event => {
+          event.preventDefault();
+          open(button, field.isConnected ? field : shell.querySelector(fieldSelector) || field);
+        });
+        button.classList.toggle('rk-hidden', !Rk.isEnabled(ctx.id));
+        const box = field.closest('.flex.items-end') || field.parentElement;
+        if (box && box !== shell) box.prepend(button);
+        else field.before(button);
+      };
+      Rk.observe('.react-chat-dialog-shell', shell => {
+        attach(shell);
+        new MutationObserver(() => {
+          if (!shell.querySelector('.rk-quick-reply-button')) attach(shell);
+        }).observe(shell, { childList: true, subtree: true });
+      });
+      Rk.onSettings(() => {
+        const on = Rk.isEnabled(ctx.id);
+        for (const button of document.querySelectorAll('.rk-quick-reply-button')) button.classList.toggle('rk-hidden', !on);
+        if (!on && close) close();
+      });
+    }
+  });
+
+  Rk.feature({
     id: 'site.smoothScroll',
     category: 'site',
     name: 'Smooth scrolling',

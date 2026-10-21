@@ -850,6 +850,134 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
   });
 
   Rk.feature({
+    id: 'profiles.flagged',
+    category: 'profiles',
+    name: 'Flagged users',
+    description: 'Shows a red flag next to users flagged by Roblox Verifieds or Rola admins. Hover or click the flag to see why.',
+    default: false,
+    css: `
+.rk-flag { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; margin-left: 4px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #ff4d4f; vertical-align: middle; cursor: pointer; transition: background-color var(--rk-fast) ease; }
+.rk-flag:hover, .rk-flag[aria-expanded="true"] { background: rgba(255, 77, 79, 0.16); }
+.rk-flag svg { fill: currentColor; }
+.rk-flag-pop { position: fixed; z-index: 2147481800; width: 290px; max-height: 340px; overflow-y: auto; padding: 10px 12px; border: 1px solid rgba(255, 77, 79, 0.45); border-radius: 10px; background: var(--rk-bg); box-shadow: var(--rk-shadow); color: var(--rk-text); font-family: var(--rk-font); text-align: left; opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity 140ms ease, transform 180ms var(--rk-ease); }
+.rk-flag-pop.rk-flag-pop-open { opacity: 1; transform: none; pointer-events: auto; }
+.rk-flag-title { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: #ff4d4f; }
+.rk-flag-item + .rk-flag-item { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rk-border); }
+.rk-flag-reason { font-size: 14px; font-weight: 700; color: var(--rk-text-strong); }
+.rk-flag-note { margin-top: 2px; font-size: 13px; color: var(--rk-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rk-flag-meta { margin-top: 4px; font-size: 11px; color: var(--rk-muted); }
+.rk-flag-pop a { color: var(--rk-accent); font-size: 12px; }
+`,
+    async run(ctx) {
+      const flags = await Rk.bg('flagged').catch(() => null);
+      if (!flags || typeof flags !== 'object') return;
+      const pop = el('div', { class: 'rk-flag-pop', role: 'dialog', 'aria-label': 'Why this user is flagged' });
+      let owner = null;
+      let pinned = false;
+      let hideTimer = 0;
+      const when = at => {
+        const date = new Date(Number(at));
+        return Number.isNaN(date.getTime()) || !at ? '' : date.toLocaleDateString();
+      };
+      const close = () => {
+        clearTimeout(hideTimer);
+        pop.classList.remove('rk-flag-pop-open');
+        if (owner) owner.setAttribute('aria-expanded', 'false');
+        owner = null;
+        pinned = false;
+      };
+      const open = (button, userId) => {
+        const entry = flags[userId];
+        if (!entry) return;
+        clearTimeout(hideTimer);
+        if (owner && owner !== button) owner.setAttribute('aria-expanded', 'false');
+        owner = button;
+        button.setAttribute('aria-expanded', 'true');
+        const fromVerifieds = entry.flags.some(flag => flag.source === 'Roblox Verifieds');
+        pop.replaceChildren(
+          el('div', { class: 'rk-flag-title' }, icon('flag', 14), entry.flags.length === 1 ? 'Flagged for 1 reason' : `Flagged for ${entry.flags.length} reasons`),
+          ...entry.flags.map(flag => el('div', { class: 'rk-flag-item' },
+            el('div', { class: 'rk-flag-reason' }, flag.reason),
+            flag.note ? el('div', { class: 'rk-flag-note' }, flag.note) : null,
+            el('div', { class: 'rk-flag-meta' }, [flag.source, when(flag.at)].filter(Boolean).join(' · '))
+          )),
+          fromVerifieds ? el('div', { class: 'rk-flag-meta' }, el('a', { href: `https://robloxverifieds.com/user/${userId}`, target: '_blank', rel: 'noopener noreferrer' }, 'View on Roblox Verifieds')) : null
+        );
+        if (!pop.isConnected) document.body.append(pop);
+        const rect = button.getBoundingClientRect();
+        pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 300))}px`;
+        pop.style.top = `${rect.bottom + 6 + 340 > window.innerHeight ? Math.max(8, rect.top - 6 - Math.min(pop.scrollHeight || 200, 340)) : rect.bottom + 6}px`;
+        pop.classList.add('rk-flag-pop-open');
+      };
+      const later = () => {
+        if (pinned) return;
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(close, 180);
+      };
+      pop.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+      pop.addEventListener('mouseleave', later);
+      document.addEventListener('mousedown', event => {
+        if (owner && !pop.contains(event.target) && !owner.contains(event.target)) close();
+      }, true);
+      window.addEventListener('scroll', () => {
+        if (owner && !pinned) close();
+      }, { passive: true });
+      const flagButton = userId => {
+        const button = el('button', { type: 'button', class: 'rk-flag', 'aria-label': 'Flagged user, see why', 'aria-expanded': 'false', dataset: { userId: String(userId) } }, icon('flag', 14));
+        button.addEventListener('mouseenter', () => open(button, Number(button.dataset.userId)));
+        button.addEventListener('mouseleave', later);
+        button.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (owner === button && pinned) {
+            close();
+            return;
+          }
+          open(button, Number(button.dataset.userId));
+          pinned = true;
+        });
+        return button;
+      };
+      const mark = (host, userId) => {
+        if (!host || !Rk.isId(userId)) return;
+        let button = host.querySelector(':scope > .rk-flag');
+        const flagged = Rk.isEnabled(ctx.id) && Boolean(flags[userId]);
+        if (!flagged) {
+          if (button) button.remove();
+          return;
+        }
+        if (!button) {
+          button = flagButton(userId);
+          host.append(button);
+        }
+        button.dataset.userId = String(userId);
+      };
+      const page = Rk.page();
+      if (page.type === 'profile') {
+        const id = profileId();
+        if (id && flags[id]) addStatus(flagButton(id), 0);
+      }
+      Rk.observe(CARD, card => {
+        if (!singleCard(card)) return;
+        const sync = () => mark(card.querySelector('.avatar-name, .avatar-card-name, .text-overflow') || card, userIdNear(card));
+        sync();
+        new MutationObserver(sync).observe(card, { attributes: true, attributeFilter: ['href'], subtree: true });
+      });
+      Rk.observe('.friends-carousel-tile', tile => {
+        const link = tile.querySelector('a[href*="/users/"]');
+        const match = link && /\/users\/(\d+)/.exec(link.getAttribute('href'));
+        if (match) mark(tile.querySelector('.friends-carousel-tile-label') || tile, Number(match[1]));
+      });
+      Rk.onSettings(() => {
+        if (!Rk.isEnabled(ctx.id)) {
+          close();
+          for (const button of document.querySelectorAll('.rk-flag')) button.remove();
+        }
+      });
+    }
+  });
+
+  Rk.feature({
     id: 'profiles.exactCounts',
     category: 'profiles',
     name: 'Exact friend counts',

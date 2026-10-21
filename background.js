@@ -767,6 +767,105 @@ const saveBadges = async ({ userId, badges } = {}) => {
   return users;
 };
 
+const FLAGS_KEY = 'rkbg:flags';
+
+const flagText = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+
+const cleanFlagList = list => (Array.isArray(list) ? list : [])
+  .map(entry => ({ reason: flagText(entry && entry.reason, 80), note: flagText(entry && entry.note, 600), at: Number(entry && entry.at) || 0 }))
+  .filter(entry => entry.reason)
+  .slice(0, 20);
+
+const verifiedsPage = async page => {
+  const response = await fetch(`https://robloxverifieds.com/flagged/__data.json?page=${page}`, { credentials: 'omit' });
+  if (!response.ok) throw new Error(`flag list failed ${response.status}`);
+  const json = await response.json();
+  const node = json && Array.isArray(json.nodes) ? json.nodes.find(item => item && Array.isArray(item.data) && item.data[0] && 'Flagged' in item.data[0]) : null;
+  if (!node) throw new Error('unexpected flag list');
+  const data = node.data;
+  const seen = new Set();
+  const hydrate = index => {
+    if (!Number.isInteger(index) || index < 0 || index >= data.length || seen.has(index)) return null;
+    const value = data[index];
+    if (Array.isArray(value)) {
+      seen.add(index);
+      const result = value.map(hydrate);
+      seen.delete(index);
+      return result;
+    }
+    if (value && typeof value === 'object') {
+      seen.add(index);
+      const result = Object.fromEntries(Object.entries(value).map(([key, item]) => [key, hydrate(item)]));
+      seen.delete(index);
+      return result;
+    }
+    return value;
+  };
+  return hydrate(0);
+};
+
+const flaggedUsers = async () => {
+  const saved = (await chrome.storage.local.get(FLAGS_KEY))[FLAGS_KEY];
+  if (saved && Date.now() - saved.time < 3600000 && saved.users && typeof saved.users === 'object') return saved.users;
+  const users = {};
+  const add = (id, name, source, flags) => {
+    if (!/^\d{1,15}$/.test(String(id)) || !flags.length) return;
+    const entry = users[id] || { name: '', flags: [] };
+    if (name && !entry.name) entry.name = name;
+    entry.flags.push(...flags.map(flag => ({ ...flag, source })));
+    users[id] = entry;
+  };
+  try {
+    const first = await verifiedsPage(1);
+    const pages = Math.min(Number(first && first.TotalPages) || 1, 20);
+    const results = [first];
+    for (let page = 2; page <= pages; page += 1) results.push(await verifiedsPage(page));
+    for (const result of results) {
+      for (const item of Array.isArray(result && result.Flagged) ? result.Flagged : []) {
+        const user = item && item.User;
+        if (!user || user.OptedOut || user.HiddenForReview) continue;
+        add(user.UserId, flagText(user.Username, 40), 'Roblox Verifieds', cleanFlagList((item.Flags || []).map(flag => ({ reason: flag && flag.Reason, note: flag && flag.Note, at: flag && flag.CreatedAt }))));
+      }
+    }
+  } catch {}
+  const rola = await fetch('https://raw.githubusercontent.com/1ypii/Rola/main/flags.json', { credentials: 'omit', cache: 'no-cache' }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+  for (const [id, list] of Object.entries(rola && rola.users && typeof rola.users === 'object' ? rola.users : {})) add(id, '', 'Rola', cleanFlagList(list));
+  await chrome.storage.local.set({ [FLAGS_KEY]: { time: Date.now(), users } });
+  return users;
+};
+
+const repoFile = async (path, token) => {
+  const headers = { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' };
+  const response = await fetch(`https://api.github.com/repos/1ypii/Rola/contents/${path}`, { headers, credentials: 'omit', cache: 'no-store' });
+  if (!response.ok) throw new Error(`github read failed ${response.status}`);
+  const file = await response.json();
+  const text = new TextDecoder().decode(Uint8Array.from(atob(String(file.content || '').replace(/\s/g, '')), char => char.charCodeAt(0)));
+  return { sha: file.sha, data: JSON.parse(text) || {}, headers };
+};
+
+const writeRepoFile = async (path, file, data) => {
+  const content = encodeBytes(new TextEncoder().encode(`${JSON.stringify(data, null, 2)}\n`).buffer);
+  const response = await fetch(`https://api.github.com/repos/1ypii/Rola/contents/${path}`, { method: 'PUT', headers: { ...file.headers, 'content-type': 'application/json' }, credentials: 'omit', body: JSON.stringify({ message: '', content, sha: file.sha }) });
+  if (!response.ok) throw new Error(`github write failed ${response.status}`);
+};
+
+const saveFlag = async ({ userId, reason, note, remove } = {}) => {
+  if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad flag request');
+  const token = (await chrome.storage.local.get('rk:gh-token'))['rk:gh-token'];
+  if (typeof token !== 'string' || !token) throw new Error('missing token');
+  const file = await repoFile('flags.json', token);
+  const users = file.data.users && typeof file.data.users === 'object' ? file.data.users : {};
+  const list = cleanFlagList(users[userId]);
+  if (Number.isInteger(remove)) list.splice(remove, 1);
+  else if (flagText(reason, 80)) list.push({ reason: flagText(reason, 80), note: flagText(note, 600), at: Date.now() });
+  else throw new Error('missing reason');
+  if (list.length) users[userId] = list;
+  else delete users[userId];
+  await writeRepoFile('flags.json', file, { users });
+  await chrome.storage.local.remove(FLAGS_KEY);
+  return list;
+};
+
 const handlers = {
   values: () => loadValues(),
   notify: payload => {
@@ -778,6 +877,8 @@ const handlers = {
   'image-data': payload => imageData(payload || {}),
   regions: () => regionList(),
   'rola-badges': () => rolaBadges(),
+  flagged: () => flaggedUsers(),
+  'save-flag': payload => saveFlag(payload || {}),
   'save-badges': payload => saveBadges(payload || {}),
   'server-region': payload => serverRegion(payload || {}),
   sound: payload => playSound(payload).then(() => true),
