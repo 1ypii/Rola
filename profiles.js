@@ -186,20 +186,37 @@ button.rk-profile-chip:active { transform: scale(0.97); }
   };
 
   const wornItems = userId => cached(`worn:${userId}`, async () => {
-    const json = await Rk.api.get(`https://avatar.roblox.com/v1/users/${userId}/currently-wearing`);
+    const [json, avatar] = await Promise.all([
+      Rk.api.get(`https://avatar.roblox.com/v1/users/${userId}/currently-wearing`),
+      safe(Rk.api.get(`https://avatar.roblox.com/v1/users/${userId}/avatar`))
+    ]);
     const ids = json && Array.isArray(json.assetIds) ? [...new Set(json.assetIds.map(Number).filter(Rk.isId))].slice(0, 100) : [];
+    const names = new Map((avatar && Array.isArray(avatar.assets) ? avatar.assets : []).filter(asset => asset && Rk.isId(asset.id) && typeof asset.name === 'string').map(asset => [Number(asset.id), asset.name]));
     const details = new Map();
     if (ids.length) {
       const result = await safe(Rk.api.post('https://catalog.roblox.com/v1/catalog/items/details', { items: ids.map(id => ({ itemType: 'Asset', id })) }));
       for (const item of (result && Array.isArray(result.data) ? result.data : [])) {
-        if (item && Rk.isId(item.id)) details.set(Number(item.id), item);
+        if (!item || !Rk.isId(item.id)) continue;
+        const offSale = item.isOffSale === true || item.priceStatus === 'Off Sale' || typeof item.price !== 'number';
+        const resale = [item.lowestResalePrice, item.lowestPrice].find(value => typeof value === 'number' && value > 0);
+        details.set(Number(item.id), { ...item, rkName: item.name, rkSale: offSale ? null : item.price, rkResale: offSale && item.hasResellers !== false && resale ? resale : null });
       }
       const missing = ids.filter(id => !details.has(id));
-      await Promise.all(missing.map(async id => {
-        const asset = await safe(Rk.api.get(`https://economy.roblox.com/v2/assets/${id}/details`, { cache: 600000 }));
-        if (!asset || typeof asset.Name !== 'string') return;
-        details.set(id, { id, name: asset.Name, price: asset.IsForSale && typeof asset.PriceInRobux === 'number' ? asset.PriceInRobux : null, priceStatus: asset.IsForSale ? null : 'Off Sale' });
-      }));
+      for (let index = 0; index < missing.length; index += 4) {
+        await Promise.all(missing.slice(index, index + 4).map(async id => {
+          const asset = await safe(Rk.api.get(`https://economy.roblox.com/v2/assets/${id}/details`, { cache: 600000 }));
+          if (!asset || typeof asset.Name !== 'string') return;
+          const collectible = asset.CollectiblesItemDetails && typeof asset.CollectiblesItemDetails === 'object' ? asset.CollectiblesItemDetails : null;
+          const resale = collectible && typeof collectible.CollectibleLowestResalePrice === 'number' && collectible.CollectibleLowestResalePrice > 0 ? collectible.CollectibleLowestResalePrice : null;
+          const sale = asset.IsForSale && typeof asset.PriceInRobux === 'number' ? asset.PriceInRobux : null;
+          details.set(id, { id, name: asset.Name, price: sale, priceStatus: asset.IsForSale ? null : 'Off Sale', rkName: asset.Name, rkSale: sale, rkResale: sale === null ? resale : null });
+        }));
+      }
+    }
+    for (const id of ids) {
+      const item = details.get(id);
+      if (item && item.rkName) continue;
+      if (names.has(id)) details.set(id, { ...(item || { id, price: null, priceStatus: 'Off Sale' }), rkName: names.get(id) });
     }
     return { ids, details };
   });
@@ -1360,11 +1377,10 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       if (!worn || !worn.ids.length) return null;
       const cards = worn.ids.map(assetId => {
         const item = worn.details.get(assetId);
-        const name = item && typeof item.name === 'string' && item.name ? item.name : `Item ${assetId}`;
-        const amount = item && typeof item.lowestPrice === 'number' && item.priceStatus !== 'Off Sale' && typeof item.price !== 'number' ? item.lowestPrice : item ? item.price : null;
+        const name = item && typeof item.rkName === 'string' && item.rkName ? item.rkName : `Item ${assetId}`;
         let price = 'Off Sale';
-        if (typeof amount === 'number' && amount > 0) price = ui.robux(amount);
-        else if (amount === 0) price = 'Free';
+        if (item && typeof item.rkSale === 'number') price = item.rkSale > 0 ? ui.robux(item.rkSale) : 'Free';
+        else if (item && typeof item.rkResale === 'number') price = ui.robux(item.rkResale);
         return el('a', { class: 'rk-profile-item', href: `/catalog/${assetId}`, title: name },
           ui.thumb(Rk.thumb('Asset', assetId, '150x150'), { size: 150, alt: name }),
           el('span', { class: 'rk-profile-item-name' }, name),

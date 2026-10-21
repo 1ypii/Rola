@@ -545,7 +545,7 @@
     id: 'site.chatQuickReplies',
     category: 'site',
     name: 'Chat quick replies',
-    description: 'Adds a button next to the chat message box with saved replies you can drop in with one click.',
+    description: 'Adds a button next to the chat message box with saved replies that send with one click.',
     default: false,
     css: `
       .rk-quick-reply-button {
@@ -644,6 +644,20 @@
         const caret = start + text.length;
         if (typeof field.setSelectionRange === 'function') field.setSelectionRange(caret, caret);
       };
+      const send = (field, text) => {
+        if (field.isContentEditable) field.textContent = '';
+        else Object.getOwnPropertyDescriptor(field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value').set.call(field, '');
+        insert(field, text);
+        requestAnimationFrame(() => {
+          const shell = field.closest('.react-chat-dialog-shell');
+          const button = shell && shell.querySelector('button[aria-label*="send" i], button[type="submit"]');
+          if (button && !button.disabled) {
+            button.click();
+            return;
+          }
+          field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+        });
+      };
       const open = (button, field) => {
         if (close) {
           close();
@@ -656,8 +670,8 @@
             ...(replies.length ? replies.map((text, index) => {
               const item = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem', title: text }, el('span', null, text));
               item.addEventListener('click', () => {
-                insert(field, text);
                 close();
+                send(field, text);
               });
               const remove = el('button', { type: 'button', class: 'rk-quick-reply-remove', 'aria-label': `Remove ${text}`, title: 'Remove' }, icon('close', 14));
               remove.addEventListener('click', event => {
