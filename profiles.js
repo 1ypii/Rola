@@ -955,7 +955,21 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
       const page = Rk.page();
       if (page.type === 'profile') {
         const id = profileId();
-        if (id && flags[id]) addStatus(flagButton(id), 0);
+        if (id && flags[id]) {
+          const button = flagButton(id);
+          const place = () => {
+            const name = document.getElementById('profile-header-title-container-name');
+            if (!name || !name.parentElement) return;
+            const badges = name.parentElement.querySelector(':scope > span.inline-flex.shrink-0');
+            if (badges) {
+              if (badges.lastElementChild !== button) badges.append(button);
+            } else if (name.nextElementSibling !== button) {
+              name.after(button);
+            }
+          };
+          Rk.observe('#profile-header-title-container-name', place);
+          Rk.observe('.user-profile-header span.inline-flex.shrink-0', place);
+        }
       }
       Rk.observe(CARD, card => {
         if (!singleCard(card)) return;
