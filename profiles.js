@@ -1435,8 +1435,10 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
         if (data) {
           host.style.setProperty('--rk-profile-banner', `url("${data}")`);
           host.style.setProperty('--rk-profile-banner-focus', `center ${focus}`);
+          host.style.setProperty('background-image', `url("${data}")`, 'important');
         } else {
           host.style.removeProperty('--rk-profile-banner');
+          host.style.removeProperty('background-image');
         }
       }
       banner.classList.toggle('rk-hidden', !data || Boolean(host));
@@ -1475,6 +1477,11 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
           if (box === document.body || box.contains(document.querySelector('.user-profile-header'))) return;
           host = [box, ...box.querySelectorAll('*')].find(item => !item.matches('button, a, img, canvas, svg, svg *') && large(item) && painted(item)) || box;
           new MutationObserver(clearInside).observe(host, { childList: true, subtree: true });
+          new MutationObserver(() => {
+            if (!data) return;
+            if (host.classList.contains('rk-banner-host') && host.style.getPropertyPriority('background-image') === 'important') return;
+            paint();
+          }).observe(host, { attributes: true, attributeFilter: ['class', 'style'] });
           paint();
         });
       }
