@@ -1,3 +1,11 @@
 {
-  "users": {}
+  "users": {
+    "2301741614": [
+      {
+        "reason": "Doxxing / Harassment",
+        "note": "Test",
+        "at": 1792565999892
+      }
+    ]
+  }
 }
