@@ -693,9 +693,7 @@ const Rk = (() => {
     return own;
   };
 
-  const suspensionText = ban => (ban.until === null
-    ? 'This Roblox account was permanently removed from Rola by a Rola admin.'
-    : `This Roblox account is suspended from Rola until ${new Date(ban.until).toLocaleString()}.`);
+  const suspensionText = () => 'You have been banned from using Rola';
 
   const showSuspension = ban => {
     const key = `rk-suspension-${ban.at}`;
@@ -704,9 +702,9 @@ const Rk = (() => {
       sessionStorage.setItem(key, '1');
     } catch {}
     domReady.then(() => ui.modal({
-      title: ban.until === null ? 'Removed from Rola' : 'Rola suspended',
+      title: 'Rola',
       width: 420,
-      content: [el('p', { class: 'rk-modal-text' }, suspensionText(ban)), ban.reason ? el('p', { class: 'rk-modal-text' }, `Reason: ${ban.reason}`) : null, el('p', { class: 'rk-modal-text rk-muted' }, 'Rola features are turned off on this account.')]
+      content: el('p', { class: 'rk-modal-text' }, suspensionText())
     }));
   };
 

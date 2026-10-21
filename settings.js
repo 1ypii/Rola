@@ -1190,7 +1190,7 @@
     if (panel) return;
     const ban = Rk.suspended();
     if (ban) {
-      ui.modal({ title: ban.until === null ? 'Removed from Rola' : 'Rola suspended', width: 420, content: [el('p', { class: 'rk-modal-text' }, Rk.suspensionText(ban)), ban.reason ? el('p', { class: 'rk-modal-text' }, `Reason: ${ban.reason}`) : null] });
+      ui.modal({ title: 'Rola', width: 420, content: el('p', { class: 'rk-modal-text' }, Rk.suspensionText()) });
       return;
     }
     const saved = Rk.store.get('settings.view', null);
