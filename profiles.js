@@ -1162,27 +1162,59 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
       const id = profileId();
       const me = await Rk.me();
       if (!id || !me || me.id === id) return;
-      const universesOf = async userId => {
-        const json = await safe(Rk.api.get(`https://badges.roblox.com/v1/users/${userId}/badges?limit=100&sortOrder=Desc`));
-        const found = new Set();
-        for (const badge of json && Array.isArray(json.data) ? json.data : []) {
-          const awarder = badge && badge.awarder;
-          if (awarder && Rk.isId(Number(awarder.id))) found.add(Number(awarder.id));
+      const badgePages = async function* (userId, pages) {
+        let cursor = '';
+        for (let page = 0; page < pages; page += 1) {
+          const json = await safe(Rk.api.get(`https://badges.roblox.com/v1/users/${userId}/badges?limit=100&sortOrder=Desc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { cache: 600000 }));
+          const found = [];
+          for (const badge of json && Array.isArray(json.data) ? json.data : []) {
+            const awarder = badge && badge.awarder;
+            if (awarder && Rk.isId(Number(awarder.id))) found.push(Number(awarder.id));
+          }
+          yield found;
+          cursor = json && typeof json.nextPageCursor === 'string' ? json.nextPageCursor : '';
+          if (!cursor) return;
         }
-        return found;
       };
-      const [mine, theirs] = await Promise.all([universesOf(me.id), universesOf(id)]);
-      const shared = [...theirs].filter(universe => mine.has(universe)).slice(0, 12);
-      if (!shared.length) return;
-      const games = await safe(Rk.api.games(shared));
-      const tiles = shared.map(universe => {
-        const game = games && games.get(universe);
-        if (!game || !Rk.isId(Number(game.rootPlaceId))) return null;
-        const name = typeof game.name === 'string' && game.name ? game.name : 'Experience';
-        return tile(`/games/${game.rootPlaceId}`, ui.thumb(Rk.thumb('GameIcon', universe, '150x150'), { size: 84, alt: name }), name);
-      }).filter(Boolean);
-      if (!tiles.length) return;
-      addSection('profile', ui.section('Games you both played', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-mutual-games', actions: ui.pill(fmt.num(tiles.length)) }), 8);
+      const myUniverses = async () => {
+        const key = `rk-mutual-mine-${me.id}`;
+        try {
+          const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+          if (saved && Date.now() - saved.time < 1800000 && Array.isArray(saved.list)) return new Set(saved.list);
+        } catch {}
+        const list = new Set();
+        for await (const found of badgePages(me.id, 5)) for (const universe of found) list.add(universe);
+        try {
+          sessionStorage.setItem(key, JSON.stringify({ time: Date.now(), list: [...list] }));
+        } catch {}
+        return list;
+      };
+      const grid = el('div', { class: 'rk-profile-tiles' }, el('span', { class: 'rk-muted' }, 'Looking through badges\u2026'));
+      const count = ui.pill('0');
+      const section = addSection('profile', ui.section('Games you both played', grid, { className: 'rk-profile-mutual-games', actions: count }), 8);
+      const shown = new Set();
+      const add = async universes => {
+        const fresh = universes.filter(universe => !shown.has(universe)).slice(0, 12 - shown.size);
+        if (!fresh.length) return;
+        for (const universe of fresh) shown.add(universe);
+        const games = await safe(Rk.api.games(fresh));
+        const tiles = fresh.map(universe => {
+          const game = games && games.get(universe);
+          if (!game || !Rk.isId(Number(game.rootPlaceId))) return null;
+          const name = typeof game.name === 'string' && game.name ? game.name : 'Experience';
+          return tile(`/games/${game.rootPlaceId}`, ui.thumb(Rk.thumb('GameIcon', universe, '150x150'), { size: 84, alt: name }), name);
+        }).filter(Boolean);
+        if (!tiles.length) return;
+        if (!grid.querySelector('.rk-avatar-tile, a')) grid.replaceChildren();
+        grid.append(...tiles);
+        count.textContent = fmt.num(grid.children.length);
+      };
+      const mine = await myUniverses();
+      for await (const found of badgePages(id, 3)) {
+        await add(found.filter(universe => mine.has(universe)));
+        if (shown.size >= 12) break;
+      }
+      if (!shown.size) section.remove();
     }
   });
 

@@ -214,9 +214,24 @@ const userIcon = async userId => {
   return data;
 };
 
-const notify = async (title, message, url, sound, iconUserId) => {
+const assetIcon = async assetId => {
+  if (!Number.isSafeInteger(assetId) || assetId <= 0) return null;
+  const key = `asset:${assetId}`;
+  if (userIcons.has(key)) return userIcons.get(key);
+  const json = await robloxRequest(`https://thumbnails.roblox.com/v1/assets?assetIds=${assetId}&size=150x150&format=Png`).catch(() => null);
+  const entry = json && Array.isArray(json.data) ? json.data[0] : null;
+  const src = entry && entry.state === 'Completed' && typeof entry.imageUrl === 'string' ? entry.imageUrl : null;
+  if (!src || !/^https:\/\/[a-z0-9.-]+\.rbxcdn\.com\//i.test(src)) return null;
+  const response = await fetch(src, { credentials: 'omit' }).catch(() => null);
+  if (!response || !response.ok) return null;
+  const data = `data:image/png;base64,${encodeBytes(await response.arrayBuffer())}`;
+  userIcons.set(key, data);
+  return data;
+};
+
+const notify = async (title, message, url, sound, iconUserId, iconAssetId) => {
   const id = `rk|${Date.now()}|${isRobloxUrl(url) ? url : 'https://www.roblox.com/home'}`;
-  const icon = iconUserId ? await userIcon(iconUserId).catch(() => null) : null;
+  const icon = iconUserId ? await userIcon(iconUserId).catch(() => null) : iconAssetId ? await assetIcon(iconAssetId).catch(() => null) : null;
   chrome.notifications.create(id, {
     type: 'basic',
     iconUrl: icon || NOTIFY_ICON,
@@ -441,7 +456,7 @@ const pollPriceAlerts = async (data, state) => {
     if (price > alert.target) continue;
     const key = `${alert.id}:${alert.target}`;
     next[key] = true;
-    if (!hits[key]) notify(cleanText(alert.name, 80) || 'Price alert', `Listed for ${price.toLocaleString()} Robux, your target was ${alert.target.toLocaleString()}`, `https://www.roblox.com/catalog/${alert.id}`);
+    if (!hits[key]) notify(cleanText(alert.name, 80) || 'Price alert', `Listed for ${price.toLocaleString()} Robux, your target was ${alert.target.toLocaleString()}`, `https://www.roblox.com/catalog/${alert.id}`, undefined, undefined, Number(alert.id));
   }
   state.priceHits = next;
   await chrome.storage.local.set({ 'rkbg:priceLows': lows });
