@@ -604,6 +604,7 @@ const poll = async () => {
   } catch {
     return;
   }
+  if (activeBan(await rolaBans(), me.id)) return;
   let state = stored[STATE_KEY] && typeof stored[STATE_KEY] === 'object' ? stored[STATE_KEY] : {};
   if (state.userId !== me.id) state = { userId: me.id };
   const jobs = [];
@@ -944,6 +945,32 @@ const saveFlag = async ({ userId, reason, note, remove } = {}) => {
   return list;
 };
 
+let banCache = null;
+
+const cleanBans = users => {
+  const clean = {};
+  for (const [id, ban] of Object.entries(users && typeof users === 'object' ? users : {})) {
+    if (!/^\d{1,15}$/.test(id) || !ban || typeof ban !== 'object') continue;
+    const until = ban.until === null ? null : Number(ban.until);
+    if (until !== null && !Number.isFinite(until)) continue;
+    clean[id] = { until, reason: flagText(ban.reason, 300), at: Number(ban.at) || 0 };
+  }
+  return clean;
+};
+
+const rolaBans = async () => {
+  if (banCache && Date.now() - banCache.at < 300000) return banCache.users;
+  const json = await fetch('https://raw.githubusercontent.com/1ypii/Rola/main/bans.json', { credentials: 'omit', cache: 'no-cache' }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+  const users = cleanBans(json && json.users);
+  banCache = { at: Date.now(), users };
+  return users;
+};
+
+const activeBan = (bans, userId) => {
+  const ban = bans && bans[userId];
+  return ban && (ban.until === null || ban.until > Date.now()) ? ban : null;
+};
+
 let adminCache = null;
 
 const adminAccounts = async () => {
@@ -975,6 +1002,24 @@ const handlers = {
   'rola-badges': () => rolaBadges(),
   flagged: () => flaggedUsers(),
   admins: () => adminAccounts(),
+  bans: () => rolaBans(),
+  'save-ban': async ({ userId, duration, reason, remove } = {}) => {
+    if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad ban request');
+    const token = (await chrome.storage.local.get('rk:gh-token'))['rk:gh-token'];
+    if (typeof token !== 'string' || !token) throw new Error('missing token');
+    const file = await repoFile('bans.json', token);
+    const users = cleanBans(file.data.users);
+    if (remove) {
+      delete users[userId];
+    } else {
+      const days = { day: 1, three: 3, week: 7 }[duration];
+      if (!days && duration !== 'termination') throw new Error('bad duration');
+      users[userId] = { until: duration === 'termination' ? null : Date.now() + days * 86400000, reason: flagText(reason, 300), at: Date.now() };
+    }
+    await writeRepoFile('bans.json', file, { users });
+    banCache = { at: Date.now(), users };
+    return users[userId] || null;
+  },
   'save-admin': async ({ username, salt, hash, token, remove } = {}) => {
     const name = typeof username === 'string' ? username.trim().slice(0, 40) : '';
     if (!/^[A-Za-z0-9_.-]{2,40}$/.test(name)) throw new Error('pick a username with letters, numbers, dots, dashes or underscores');

@@ -109,9 +109,11 @@ const Rk = (() => {
     return clean;
   };
 
+  let suspension = null;
+
   const isEnabled = id => {
     const entry = featureById.get(id);
-    if (!entry) return false;
+    if (!entry || suspension) return false;
     const value = settings.enabled[id];
     return typeof value === 'boolean' ? value : entry.default;
   };
@@ -689,6 +691,23 @@ const Rk = (() => {
       persist({ [DATA_KEY]: data });
     }
     return own;
+  };
+
+  const suspensionText = ban => (ban.until === null
+    ? 'This Roblox account was permanently removed from Rola by a Rola admin.'
+    : `This Roblox account is suspended from Rola until ${new Date(ban.until).toLocaleString()}.`);
+
+  const showSuspension = ban => {
+    const key = `rk-suspension-${ban.at}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+    } catch {}
+    domReady.then(() => ui.modal({
+      title: ban.until === null ? 'Removed from Rola' : 'Rola suspended',
+      width: 420,
+      content: [el('p', { class: 'rk-modal-text' }, suspensionText(ban)), ban.reason ? el('p', { class: 'rk-modal-text' }, `Reason: ${ban.reason}`) : null, el('p', { class: 'rk-modal-text rk-muted' }, 'Rola features are turned off on this account.')]
+    }));
   };
 
   const storeApi = {
@@ -1297,7 +1316,19 @@ const Rk = (() => {
       report('storage', err);
     }
     resolveReady();
-    Promise.race([waitFor('meta[name="user-data"]'), domReady]).then(runFeatures);
+    Promise.race([waitFor('meta[name="user-data"]'), domReady]).then(async () => {
+      const id = accountId();
+      const bans = id ? await bg('bans').catch(() => null) : null;
+      const ban = bans && bans[id];
+      if (ban && (ban.until === null || ban.until > Date.now())) {
+        suspension = ban;
+        applyCss();
+        emitSettings();
+        showSuspension(ban);
+        return;
+      }
+      runFeatures();
+    });
   };
 
   return {
@@ -1335,6 +1366,8 @@ const Rk = (() => {
     thumbToken,
     values,
     bg,
+    suspended: () => suspension,
+    suspensionText,
     images,
     launch,
     store: storeApi,

@@ -786,7 +786,7 @@
 
   const adminProfile = async id => {
     const safe = promise => Promise.resolve(promise).catch(() => null);
-    const [user, groups, games, presence, history, friends, followers, following, badges, flagged] = await Promise.all([
+    const [user, groups, games, presence, history, friends, followers, following, badges, flagged, bans] = await Promise.all([
       safe(Rk.api.get(`https://users.roblox.com/v1/users/${id}`)),
       safe(Rk.api.get(`https://groups.roblox.com/v2/users/${id}/groups/roles`)),
       safe(Rk.api.get(`https://games.roblox.com/v2/users/${id}/games?accessFilter=Public&limit=50&sortOrder=Desc`)),
@@ -796,7 +796,8 @@
       safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followers/count`)),
       safe(Rk.api.get(`https://friends.roblox.com/v1/users/${id}/followings/count`)),
       safe(Rk.bg('rola-badges')),
-      safe(Rk.bg('flagged'))
+      safe(Rk.bg('flagged')),
+      safe(Rk.bg('bans'))
     ]);
     if (!user || !Rk.isId(user.id)) return el('div', { class: 'rk-admin-empty' }, 'No user found');
     const entry = presence && Array.isArray(presence.userPresences) ? presence.userPresences[0] : null;
@@ -829,11 +830,49 @@
       renderNotes();
     };
     renderNotes();
+    const rolaStatus = el('span');
+    let ban = bans && bans[user.id] && (bans[user.id].until === null || bans[user.id].until > Date.now()) ? bans[user.id] : null;
+    const showStatus = () => {
+      rolaStatus.className = ban ? 'rk-admin-bad' : 'rk-admin-good';
+      rolaStatus.textContent = !ban ? 'OK' : ban.until === null ? 'Terminated' : `Banned until ${new Date(ban.until).toLocaleString()}`;
+      rolaStatus.title = ban && ban.reason ? ban.reason : '';
+    };
+    showStatus();
+    const moderate = () => {
+      const reason = el('textarea', { class: 'rk-input rk-admin-textarea', placeholder: 'Reason, shown to them', maxlength: '300' });
+      const apply = async (duration, remove) => {
+        try {
+          ban = await Rk.bg('save-ban', { userId: user.id, duration, reason: reason.value, remove });
+          showStatus();
+          handle.close();
+          ui.toast(remove ? `${user.name} can use Rola again` : `${user.name} is ${duration === 'termination' ? 'terminated from' : 'banned from'} Rola`, { tone: 'success' });
+        } catch (err) {
+          const message = err && err.message ? err.message : 'unknown error';
+          ui.toast(message === 'missing token' ? 'Add your GitHub token in the Rola Badges card first' : `Could not save: ${message}`, { tone: 'danger', duration: 7000 });
+        }
+      };
+      const handle = ui.modal({
+        title: `Moderate ${user.name}`,
+        width: 440,
+        content: [
+          el('p', { class: 'rk-modal-text' }, 'Choose how long they lose access to Rola. It applies on every browser where they use Rola with this Roblox account.'),
+          reason,
+          el('div', { class: 'rk-inline' },
+            ui.button('1 day', { variant: 'secondary', onClick: () => apply('day') }),
+            ui.button('3 days', { variant: 'secondary', onClick: () => apply('three') }),
+            ui.button('7 days', { variant: 'secondary', onClick: () => apply('week') }),
+            ui.button('Termination', { variant: 'danger', onClick: () => apply('termination') })
+          ),
+          ban ? ui.button('Lift ban', { variant: 'ghost', onClick: () => apply(null, true) }) : null
+        ]
+      });
+    };
     return el('div', { class: 'rk-admin-grid' },
       el('div', { class: 'rk-admin-column' },
         adminCard('Account Summary',
           adminRow('Display Name', el('span', { class: 'rk-inline' }, String(user.displayName), user.hasVerifiedBadge ? el('span', { class: 'rk-admin-tag' }, 'Verified') : null)),
           adminRow('Moderation Status', el('span', { class: user.isBanned ? 'rk-admin-bad' : 'rk-admin-good' }, user.isBanned ? 'Terminated' : 'OK')),
+          adminRow('Rola Status', rolaStatus),
           adminRow('User ID', String(user.id)),
           adminRow('User Name', String(user.name)),
           adminRow('Joined', adminDate(user.created)),
@@ -845,18 +884,22 @@
             el('div', { class: 'rk-admin-links' },
               el('a', { href: `/users/${user.id}/profile`, target: '_blank' }, 'User homepage'),
               el('a', { href: `/users/${user.id}/inventory`, target: '_blank' }, 'Inventory'),
-              el('a', { href: `/users/${user.id}/friends`, target: '_blank' }, 'Friends')
+              el('a', { href: `/users/${user.id}/friends`, target: '_blank' }, 'Friends'),
+              el('a', { href: '#', onclick: event => {
+                event.preventDefault();
+                moderate();
+              } }, 'Moderate user')
             )
           )
         ),
-        adminCard(`Created Games (${gameRows.length})`, adminTable(['Game', 'Visits', 'Updated'], gameRows))
+        adminCard(`Created Games (${gameRows.length})`, adminTable(['Game', 'Visits', 'Updated'], gameRows)),
+        flagCard(user.id, flagged && flagged[user.id]),
+        adminCard(`Past Usernames (${names.length})`, names.length ? el('div', { class: 'rk-inline' }, names.map(name => el('span', { class: 'rk-admin-tag' }, name))) : el('div', { class: 'rk-admin-empty' }, 'None'))
       ),
       el('div', { class: 'rk-admin-column' },
         adminCard(`Groups (${groupRows.length})`, adminTable(['Group', 'Role', 'Members'], groupRows)),
         adminCard('User Notes', noteField, ui.button('Add Note', { variant: 'primary', onClick: addNote }), noteList),
-        badgeCard(user.id, badges && Array.isArray(badges[user.id]) ? badges[user.id] : []),
-        flagCard(user.id, flagged && flagged[user.id]),
-        adminCard(`Past Usernames (${names.length})`, names.length ? el('div', { class: 'rk-inline' }, names.map(name => el('span', { class: 'rk-admin-tag' }, name))) : el('div', { class: 'rk-admin-empty' }, 'None'))
+        badgeCard(user.id, badges && Array.isArray(badges[user.id]) ? badges[user.id] : [])
       )
     );
   };
@@ -1145,6 +1188,11 @@
 
   const open = () => {
     if (panel) return;
+    const ban = Rk.suspended();
+    if (ban) {
+      ui.modal({ title: ban.until === null ? 'Removed from Rola' : 'Rola suspended', width: 420, content: [el('p', { class: 'rk-modal-text' }, Rk.suspensionText(ban)), ban.reason ? el('p', { class: 'rk-modal-text' }, `Reason: ${ban.reason}`) : null] });
+      return;
+    }
     const saved = Rk.store.get('settings.view', null);
     if (saved && Rk.categories.some(item => item.id === saved.category)) {
       activeCategory = saved.category;
