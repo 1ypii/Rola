@@ -171,17 +171,33 @@ const playSound = async override => {
   await chrome.runtime.sendMessage({ type: 'rk-play', key: data ? assetId : null, data }).catch(() => {});
 };
 
+const PROFILE_SONG_KEY = 'rk:profile-song';
+
 const syncMusic = async () => {
+  const open = await hasOffscreen();
+  const song = (await chrome.storage.session.get(PROFILE_SONG_KEY))[PROFILE_SONG_KEY];
+  if (song) {
+    const tab = await chrome.tabs.get(song.tabId).catch(() => null);
+    if (tab && tab.url === song.url) {
+      if (!song.paused) return playTrack(song.assetId, song.volume, open);
+      if (open) await chrome.runtime.sendMessage({ type: 'rk-music', id: null }).catch(() => {});
+      return 'paused';
+    }
+    await chrome.storage.session.remove(PROFILE_SONG_KEY);
+  }
   const settings = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
   const options = (settings && settings.options && settings.options['tools.backgroundMusic']) || {};
   const assetId = typeof options.assetId === 'string' && /^\d{1,20}$/.test(options.assetId.trim()) ? options.assetId.trim() : null;
   const volume = Number.isFinite(options.volume) ? Math.min(Math.max(options.volume, 0), 100) / 100 : 0.4;
   const tabs = assetId && isOn(settings, 'tools.backgroundMusic') ? await chrome.tabs.query({ url: 'https://www.roblox.com/*' }) : [];
-  const open = await hasOffscreen();
   if (!tabs.length) {
     if (open) await chrome.runtime.sendMessage({ type: 'rk-music', id: null }).catch(() => {});
     return 'off';
   }
+  return playTrack(assetId, volume, open);
+};
+
+const playTrack = async (assetId, volume, open) => {
   const current = open ? await chrome.runtime.sendMessage({ type: 'rk-music-state' }).catch(() => null) : null;
   if (current && current.id === assetId) {
     await chrome.runtime.sendMessage({ type: 'rk-music', id: assetId, volume }).catch(() => {});
@@ -984,6 +1000,7 @@ const adminRequest = async (path, { method = 'GET', body } = {}) => {
 };
 
 const REPORTS_SEEN_KEY = 'rkbg:reports-seen';
+let announcementCache = null;
 const REPORT_REASONS = { banner: 'Bad profile banner', scam: 'Scamming', harassment: 'Harassment', inappropriate: 'Inappropriate', other: 'Other' };
 
 const pollReports = async () => {
@@ -1131,6 +1148,52 @@ const handlers = {
     syncAlarm();
     return true;
   },
+  'admin-log': async () => {
+    const data = await adminRequest('/api/log');
+    return Array.isArray(data.log) ? data.log : [];
+  },
+  announcement: async () => {
+    if (announcementCache && Date.now() - announcementCache.at < 300000) return announcementCache.value;
+    const data = await syncRequest('/api/announcement').catch(() => null);
+    if (!data && announcementCache) return announcementCache.value;
+    announcementCache = { at: Date.now(), value: data && data.announcement ? data.announcement : null };
+    return announcementCache.value;
+  },
+  'save-announcement': async ({ text } = {}) => {
+    const data = await adminRequest('/api/announcement', { method: 'PUT', body: { text: flagText(text, 400) } });
+    announcementCache = { at: Date.now(), value: data.announcement || null };
+    return announcementCache.value;
+  },
+  'sync-song': async ({ userId, assetId } = {}) => {
+    checkSyncUser(userId);
+    if (assetId !== null && !/^\d{1,20}$/.test(String(assetId))) throw new Error('that is not an audio id');
+    const token = await syncToken(userId);
+    if (!token) throw new Error('not linked');
+    try {
+      return await syncRequest('/api/song', { method: 'PUT', body: { assetId }, token });
+    } catch (err) {
+      if (err.message === 'not linked') await chrome.storage.local.remove(`rk:sync:${userId}`);
+      throw err;
+    }
+  },
+  'shared-song': async ({ userId } = {}) => {
+    checkSyncUser(userId);
+    const profile = await syncRequest(`/api/profile/${userId}`);
+    return profile && typeof profile.song === 'string' && /^\d{1,20}$/.test(profile.song) ? profile.song : null;
+  },
+  'profile-song': async ({ assetId, volume, paused } = {}, sender) => {
+    const tab = sender && sender.tab;
+    if (!tab || !Number.isInteger(tab.id)) throw new Error('no tab');
+    if (assetId === null) {
+      const song = (await chrome.storage.session.get(PROFILE_SONG_KEY))[PROFILE_SONG_KEY];
+      if (song && song.tabId === tab.id) await chrome.storage.session.remove(PROFILE_SONG_KEY);
+    } else {
+      if (!/^\d{1,20}$/.test(String(assetId))) throw new Error('that is not an audio id');
+      const level = Number.isFinite(volume) ? Math.min(Math.max(volume, 0), 100) / 100 : 0.3;
+      await chrome.storage.session.set({ [PROFILE_SONG_KEY]: { tabId: tab.id, url: tab.url, assetId: String(assetId), volume: level, paused: Boolean(paused) } });
+    }
+    return syncMusic();
+  },
   'admin-logout': async () => {
     await chrome.storage.local.remove('rk:admin-token');
     syncAlarm();
@@ -1167,8 +1230,16 @@ const handlers = {
     await adminRequest('/api/admin/set', { method: 'POST', body: remove ? { username: name, remove: true } : { username: name, password } });
     return admins.map(entry => entry.username);
   },
-  'save-flag': payload => saveFlag(payload || {}),
-  'save-badges': payload => saveBadges(payload || {}),
+  'save-flag': async payload => {
+    const result = await saveFlag(payload || {});
+    adminRequest('/api/log', { method: 'POST', body: { action: payload.remove ? 'unflag' : 'flag', target: String(payload.userId), detail: payload.remove ? '' : String(payload.reason || '') } }).catch(() => {});
+    return result;
+  },
+  'save-badges': async payload => {
+    const result = await saveBadges(payload || {});
+    adminRequest('/api/log', { method: 'POST', body: { action: 'badges', target: String(payload.userId), detail: payload.badges.join(', ') } }).catch(() => {});
+    return result;
+  },
   'server-region': payload => serverRegion(payload || {}),
   sound: payload => playSound(payload).then(() => true),
   music: () => syncMusic(),
@@ -1204,7 +1275,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = message && handlers[message.type];
   if (!handler) return false;
   Promise.resolve()
-    .then(() => handler(message.payload))
+    .then(() => handler(message.payload, sender))
     .then(data => sendResponse({ data }), err => sendResponse({ error: String((err && err.message) || err) }));
   return true;
 });

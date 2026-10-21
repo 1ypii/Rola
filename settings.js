@@ -975,9 +975,50 @@
           reports.length > 1 ? ui.button('Resolve all', { variant: 'ghost', onClick: () => resolve(reports.map(report => report.id)) }) : null
         ));
       };
+      const showLog = async () => {
+        results.replaceChildren(ui.spinner(20));
+        let log;
+        try {
+          log = await Rk.bg('admin-log');
+        } catch (err) {
+          results.replaceChildren(el('div', { class: 'rk-admin-empty' }, `Could not load the log: ${err && err.message ? err.message : 'unknown error'}`));
+          return;
+        }
+        const rows = log.map(entry => [
+          entry.admin,
+          entry.action,
+          /^\d{1,15}$/.test(entry.target) ? el('a', { href: `/users/${entry.target}/profile`, target: '_blank' }, entry.target) : entry.target,
+          entry.detail ? el('span', { class: 'rk-admin-empty' }, entry.detail) : '',
+          new Date(entry.at).toLocaleString()
+        ]);
+        results.replaceChildren(adminCard(`Admin log (${log.length})`, adminTable(['Admin', 'Action', 'User', 'Details', 'When'], rows)));
+      };
+      const showAnnouncement = async () => {
+        results.replaceChildren(ui.spinner(20));
+        const current = await Rk.bg('announcement').catch(() => null);
+        const text = el('textarea', { class: 'rk-input rk-admin-textarea', placeholder: 'Message every Rola user sees once', maxlength: '400' });
+        text.value = current ? current.text : '';
+        const save = async value => {
+          try {
+            await Rk.bg('save-announcement', { text: value });
+            ui.toast(value ? 'Announcement posted, it shows up for everyone within a few minutes' : 'Announcement removed', { tone: 'success' });
+            showAnnouncement();
+          } catch (err) {
+            ui.toast(`Could not save: ${err && err.message ? err.message : 'unknown error'}`, { tone: 'danger', duration: 7000 });
+          }
+        };
+        results.replaceChildren(adminCard('Announcement',
+          el('div', { class: 'rk-admin-empty' }, current ? `Live since ${new Date(current.at).toLocaleString()}, posted by ${current.by}. Posting again shows it to everyone again.` : 'Nothing is posted right now.'),
+          text,
+          el('div', { class: 'rk-inline' },
+            ui.button('Post', { variant: 'primary', onClick: () => text.value.trim() ? save(text.value.trim()) : ui.toast('Write a message first', { tone: 'warning' }) }),
+            current ? ui.button('Remove', { variant: 'ghost', onClick: () => save('') }) : null
+          )
+        ));
+      };
       const reportsButton = ui.button('Reports', { variant: 'ghost', onClick: showReports });
       adminNode.replaceChildren(
-        el('div', { class: 'rk-admin-search' }, field, ui.button('Search', { variant: 'primary', onClick: lookup }), reportsButton, ui.button('Sign out', { variant: 'ghost', onClick: signOut })),
+        el('div', { class: 'rk-admin-search' }, field, ui.button('Search', { variant: 'primary', onClick: lookup }), reportsButton, ui.button('Log', { variant: 'ghost', onClick: showLog }), ui.button('Announce', { variant: 'ghost', onClick: showAnnouncement }), ui.button('Sign out', { variant: 'ghost', onClick: signOut })),
         results
       );
     };

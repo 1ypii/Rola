@@ -536,6 +536,116 @@ button.rk-profile-chip:active { transform: scale(0.97); }
   });
 
   Rk.feature({
+    id: 'profiles.song',
+    category: 'profiles',
+    name: 'Profile song',
+    description: 'Plays a Roblox audio when other Rola users open your profile. Use a public audio id, private audio will not play for them.',
+    default: false,
+    pages: PROFILE,
+    options: [
+      { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Roblox audio id', default: '' }
+    ],
+    async run(ctx) {
+      if (!await ownProfile()) return;
+      const me = await Rk.me();
+      if (!me) return;
+      const sharedKey = `rk-song-shared:${me.id}`;
+      let shared = null;
+      try {
+        shared = localStorage.getItem(sharedKey);
+      } catch {}
+      let busy = false;
+      const share = async () => {
+        if (busy) return;
+        const raw = Rk.isEnabled(ctx.id) ? String(ctx.option('assetId') || '').trim() : '';
+        if (raw && !/^\d{1,20}$/.test(raw)) {
+          ui.toast('The audio id has to be a number', { tone: 'warning' });
+          return;
+        }
+        const wanted = raw || 'off';
+        if (wanted === shared) return;
+        busy = true;
+        try {
+          const linked = await Rk.bg('sync-linked', { userId: me.id }).catch(() => false);
+          if (!linked && (!raw || !await linkRolaAccount(me))) return;
+          await Rk.bg('sync-song', { userId: me.id, assetId: raw || null });
+          shared = wanted;
+          try {
+            localStorage.setItem(sharedKey, wanted);
+          } catch {}
+          ui.toast(raw ? 'Other Rola users now hear your song on your profile' : 'Your profile song was removed', { tone: 'success' });
+        } catch (err) {
+          ui.toast(`Could not save your song: ${err && err.message ? err.message : 'unknown error'}`, { tone: 'danger', duration: 7000 });
+        } finally {
+          busy = false;
+        }
+      };
+      share();
+      Rk.onSettings(share);
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.songs',
+    category: 'profiles',
+    name: 'Profile songs',
+    description: 'Plays the song a Rola user picked when you open their profile, with a small player to pause it.',
+    pages: PROFILE,
+    options: [
+      { key: 'volume', label: 'Volume', type: 'number', min: 0, max: 100, step: 5, default: 30 },
+      { key: 'autoplay', label: 'Start playing right away', type: 'toggle', default: true }
+    ],
+    css: `
+.rk-song { position: fixed; left: 20px; bottom: 20px; z-index: 2147481000; display: flex; align-items: center; gap: 8px; max-width: min(320px, calc(100vw - 40px)); padding: 6px 8px 6px 12px; border: 1px solid var(--rk-border); border-radius: 999px; background: var(--rk-bg); box-shadow: var(--rk-shadow); color: var(--rk-text); font-family: var(--rk-font); font-size: 13px; opacity: 0; transform: translateY(8px); transition: opacity var(--rk-med) ease, transform var(--rk-med) var(--rk-ease); }
+.rk-song.rk-song-in { opacity: 1; transform: none; }
+.rk-song-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rk-song-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
+.rk-song-bars i { width: 3px; height: 100%; border-radius: 2px; background: var(--rk-accent); transform-origin: bottom; animation: rk-song-bar 900ms ease-in-out infinite; }
+.rk-song-bars i:nth-child(2) { animation-delay: -300ms; }
+.rk-song-bars i:nth-child(3) { animation-delay: -600ms; }
+.rk-song-paused .rk-song-bars i { animation-play-state: paused; transform: scaleY(0.3); transition: transform var(--rk-med) var(--rk-ease); }
+@keyframes rk-song-bar { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+`,
+    async run(ctx) {
+      const id = profileId();
+      if (!id) return;
+      const assetId = await Rk.bg('shared-song', { userId: id }).catch(() => null);
+      if (!assetId || !Rk.isEnabled(ctx.id)) return;
+      let paused = !ctx.option('autoplay');
+      const name = el('span', { class: 'rk-song-name' }, 'Profile song');
+      const toggle = ui.button('', { variant: 'ghost', icon: paused ? 'play' : 'pause', title: paused ? 'Play' : 'Pause', onClick: () => {
+        paused = !paused;
+        sync();
+      } });
+      const player = el('div', { class: 'rk-song', role: 'group', 'aria-label': 'Profile song' }, el('span', { class: 'rk-song-bars', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')), name, toggle);
+      const sync = async () => {
+        if (!Rk.isEnabled(ctx.id)) {
+          player.remove();
+          Rk.bg('profile-song', { assetId: null }).catch(() => {});
+          return;
+        }
+        if (!player.isConnected) {
+          document.body.append(player);
+          requestAnimationFrame(() => player.classList.add('rk-song-in'));
+        }
+        player.classList.toggle('rk-song-paused', paused);
+        toggle.replaceChildren(icon(paused ? 'play' : 'pause', 16));
+        toggle.title = paused ? 'Play' : 'Pause';
+        const state = await Rk.bg('profile-song', { assetId, volume: ctx.option('volume'), paused }).catch(() => 'unavailable');
+        if (state === 'unavailable') {
+          name.textContent = 'This song is private or could not load';
+          player.classList.add('rk-song-paused');
+        }
+      };
+      sync();
+      Rk.onSettings(sync);
+      Rk.api.get(`https://economy.roblox.com/v2/assets/${assetId}/details`, { cache: 3600000 }).then(asset => {
+        if (asset && typeof asset.Name === 'string' && name.textContent === 'Profile song') name.textContent = asset.Name;
+      }).catch(() => {});
+    }
+  });
+
+  Rk.feature({
     id: 'profiles.report',
     category: 'profiles',
     name: 'Report to Rola',

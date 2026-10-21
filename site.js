@@ -375,6 +375,36 @@
   });
 
   Rk.feature({
+    id: 'site.announcements',
+    category: 'site',
+    name: 'Rola announcements',
+    description: 'Shows messages from the Rola team once, like new updates or warnings about scammers.',
+    css: `
+.rk-announce { position: fixed; top: 64px; left: 50%; z-index: 2147481500; display: flex; align-items: flex-start; gap: 10px; width: min(520px, calc(100vw - 32px)); padding: 12px 10px 12px 16px; border: 1px solid var(--rk-border); border-left: 3px solid var(--rk-accent); border-radius: var(--rk-radius); background: var(--rk-bg); box-shadow: var(--rk-shadow); color: var(--rk-text); font-family: var(--rk-font); font-size: 14px; opacity: 0; transform: translate(-50%, -8px); transition: opacity var(--rk-med) ease, transform var(--rk-med) var(--rk-ease); }
+.rk-announce.rk-announce-in { opacity: 1; transform: translate(-50%, 0); }
+.rk-announce-body { flex: 1; min-width: 0; }
+.rk-announce-title { margin-bottom: 2px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--rk-accent); }
+.rk-announce-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+`,
+    async run(ctx) {
+      const announcement = await Rk.bg('announcement').catch(() => null);
+      if (!announcement || typeof announcement.id !== 'string' || !Rk.isEnabled(ctx.id)) return;
+      if (Rk.store.get('announcements.seen', '') === announcement.id) return;
+      const card = el('div', { class: 'rk-announce', role: 'status' },
+        el('div', { class: 'rk-announce-body' }, el('div', { class: 'rk-announce-title' }, 'Rola'), el('div', { class: 'rk-announce-text' }, announcement.text)),
+        ui.button('', { variant: 'ghost', icon: 'close', title: 'Dismiss', onClick: () => {
+          Rk.store.set('announcements.seen', announcement.id);
+          card.classList.remove('rk-announce-in');
+          card.addEventListener('transitionend', () => card.remove(), { once: true });
+          setTimeout(() => card.remove(), 400);
+        } })
+      );
+      document.body.append(card);
+      requestAnimationFrame(() => card.classList.add('rk-announce-in'));
+    }
+  });
+
+  Rk.feature({
     id: 'site.pendingRobux',
     category: 'site',
     name: 'Pending Robux in header',
