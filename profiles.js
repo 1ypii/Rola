@@ -1135,7 +1135,10 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
       }
       Rk.observe(CARD, card => {
         if (!singleCard(card)) return;
-        const sync = () => mark(card.querySelector('.avatar-name, .avatar-card-name, .text-overflow') || card, userIdNear(card));
+        const sync = () => {
+          const name = card.querySelector('.avatar-card-caption .avatar-name, .avatar-card-caption .avatar-card-name, .avatar-name, .avatar-card-name');
+          mark(name && name.parentElement ? name.parentElement : card.querySelector('.avatar-card-caption') || card, userIdNear(card));
+        };
         sync();
         new MutationObserver(sync).observe(card, { attributes: true, attributeFilter: ['href'], subtree: true });
       });
