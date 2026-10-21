@@ -1249,6 +1249,24 @@ const handlers = {
       throw err;
     }
   },
+  'sync-friends': async ({ userId, ids } = {}) => {
+    checkSyncUser(userId);
+    if (ids !== null && (!Array.isArray(ids) || ids.length > 5000)) throw new Error('bad friend list');
+    const token = await syncToken(userId);
+    if (!token) throw new Error('not linked');
+    const clean = ids === null ? null : ids.filter(id => Number.isSafeInteger(id) && id > 0);
+    try {
+      return await syncRequest('/api/friends', { method: 'PUT', body: { ids: clean }, token });
+    } catch (err) {
+      if (err.message === 'not linked') await chrome.storage.local.remove(`rk:sync:${userId}`);
+      throw err;
+    }
+  },
+  'shared-friends': async ({ userId } = {}) => {
+    checkSyncUser(userId);
+    const data = await syncRequest(`/api/friends/${userId}`);
+    return data && Array.isArray(data.ids) ? { ids: data.ids.filter(id => Number.isSafeInteger(id) && id > 0), at: Number(data.at) || 0 } : null;
+  },
   'shared-song': async ({ userId } = {}) => {
     checkSyncUser(userId);
     const profile = await syncRequest(`/api/profile/${userId}`);

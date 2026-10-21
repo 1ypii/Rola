@@ -467,6 +467,105 @@ button.rk-profile-chip:active { transform: scale(0.97); }
   });
 
   Rk.feature({
+    id: 'profiles.shareFriends',
+    category: 'profiles',
+    name: 'Share my friend list',
+    description: 'Lets other Rola users see your friend list even when Roblox hides it, like for UK accounts. Rola grabs your whole list by itself and keeps it updated every few hours.',
+    default: false,
+    async run(ctx) {
+      const me = await Rk.me();
+      if (!me) return;
+      const sharedKey = `rk-friends-shared:${me.id}`;
+      const read = () => {
+        try {
+          return JSON.parse(localStorage.getItem(sharedKey) || 'null');
+        } catch {
+          return null;
+        }
+      };
+      const write = value => {
+        try {
+          if (value) localStorage.setItem(sharedKey, JSON.stringify(value));
+          else localStorage.removeItem(sharedKey);
+        } catch {}
+      };
+      let busy = false;
+      const sync = async () => {
+        if (busy) return;
+        const saved = read();
+        const on = Rk.isEnabled(ctx.id);
+        if (!on && !saved) return;
+        if (on && saved && Date.now() - saved.at < 6 * 3600000) return;
+        busy = true;
+        try {
+          const linked = await Rk.bg('sync-linked', { userId: me.id }).catch(() => false);
+          if (!linked) {
+            if (!on) {
+              write(null);
+              return;
+            }
+            try {
+              if (sessionStorage.getItem('rk-friends-link-asked')) return;
+              sessionStorage.setItem('rk-friends-link-asked', '1');
+            } catch {}
+            if (!await linkRolaAccount(me)) return;
+          }
+          if (!on) {
+            await Rk.bg('sync-friends', { userId: me.id, ids: null });
+            write(null);
+            ui.toast('Your friend list is no longer shared', { tone: 'success' });
+            return;
+          }
+          const json = await Rk.api.get(`https://friends.roblox.com/v1/users/${me.id}/friends`);
+          const ids = json && Array.isArray(json.data) ? [...new Set(json.data.map(entry => Number(entry && entry.id)).filter(Rk.isId))] : null;
+          if (!ids) throw new Error('could not load your friends from Roblox');
+          await Rk.bg('sync-friends', { userId: me.id, ids });
+          if (!saved) ui.toast(`Shared your ${fmt.plural(ids.length, 'friend')} with Rola users`, { tone: 'success' });
+          write({ at: Date.now() });
+        } catch (err) {
+          ui.toast(`Could not share your friend list: ${err && err.message ? err.message : 'unknown error'}`, { tone: 'danger', duration: 7000 });
+        } finally {
+          busy = false;
+        }
+      };
+      sync();
+      Rk.onSettings(sync);
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.sharedFriends',
+    category: 'profiles',
+    name: 'Friend lists from Rola users',
+    description: 'When Roblox hides someone\'s friend list, like for UK accounts, shows the list they shared through Rola instead.',
+    pages: PROFILE,
+    css: tilesCss,
+    async run(ctx) {
+      const id = profileId();
+      if (!id || await ownProfile()) return;
+      const native = await safe(friendIdsOf(id));
+      if (native && native.length) return;
+      const shared = await Rk.bg('shared-friends', { userId: id }).catch(() => null);
+      if (!shared || !shared.ids.length || !Rk.isEnabled(ctx.id)) return;
+      const users = await safe(Rk.api.users(shared.ids.slice(0, 200)));
+      const tiles = shared.ids.slice(0, 200).map(friendId => {
+        const user = users && users.get(friendId);
+        return tile(`/users/${friendId}/profile`, ui.thumb(Rk.thumb('AvatarHeadShot', friendId, '150x150'), { size: 64, round: true }), user ? String(user.displayName || user.name) : `User ${friendId}`, mark(isVerified(friendId, user && user.hasVerifiedBadge)));
+      });
+      tiles.slice(24).forEach(node => node.classList.add('rk-hidden'));
+      let expanded = false;
+      const more = tiles.length > 24 ? ui.button('Show all', { variant: 'ghost', onClick: () => {
+        expanded = !expanded;
+        tiles.slice(24).forEach(node => node.classList.toggle('rk-hidden', !expanded));
+        more.querySelector('span').textContent = expanded ? 'Show less' : 'Show all';
+      } }) : null;
+      const note = el('div', { class: 'rk-muted', style: { fontSize: '12px', marginTop: '8px' } }, `Shared through Rola, updated ${fmt.ago(shared.at)}`);
+      const section = addSection('profile', ui.section('Friends', [el('div', { class: 'rk-profile-tiles' }, tiles), note], { className: 'rk-profile-shared-friends', actions: [ui.pill(fmt.num(shared.ids.length)), more].filter(Boolean) }), 4);
+      Rk.onSettings(() => section && section.classList.toggle('rk-hidden', !Rk.isEnabled(ctx.id)));
+    }
+  });
+
+  Rk.feature({
     id: 'profiles.presence',
     category: 'profiles',
     name: 'Presence pill',
