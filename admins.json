@@ -14,6 +14,11 @@
       "username": "lua",
       "salt": "34660d28532a8f6db426199e53759a65",
       "hash": "a2bf06b37bd0323ace73a455783345d647d2032db71285f12af46029fe61e182"
+    },
+    {
+      "username": "sora",
+      "salt": "aaa6eed96a744a431cb519002b65f934",
+      "hash": "2fb392e67cc90d8e55d9310fcb51424fc2e3120bfaae21ae1b75e54e59c3cba5"
     }
   ]
 }
