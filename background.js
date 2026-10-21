@@ -982,8 +982,9 @@ const cleanBans = users => {
 };
 
 const rolaBans = async () => {
-  if (banCache && Date.now() - banCache.at < 300000) return banCache.users;
-  const json = await fetch('https://raw.githubusercontent.com/1ypii/Rola/main/bans.json', { credentials: 'omit', cache: 'no-cache' }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+  if (banCache && Date.now() - banCache.at < 15000) return banCache.users;
+  const json = await syncRequest('/api/bans').catch(() => null);
+  if (!json && banCache) return banCache.users;
   const users = cleanBans(json && json.users);
   banCache = { at: Date.now(), users };
   return users;
@@ -1071,16 +1072,16 @@ const handlers = {
     if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad ban request');
     const token = (await chrome.storage.local.get('rk:gh-token'))['rk:gh-token'];
     if (typeof token !== 'string' || !token) throw new Error('missing token');
-    const file = await repoFile('bans.json', token);
-    const users = cleanBans(file.data.users);
-    if (remove) {
-      delete users[userId];
-    } else {
-      const days = { day: 1, three: 3, week: 7 }[duration];
-      if (!days && duration !== 'termination') throw new Error('bad duration');
-      users[userId] = { until: duration === 'termination' ? null : Date.now() + days * 86400000, reason: flagText(reason, 300), at: Date.now() };
-    }
-    await writeRepoFile('bans.json', file, { users });
+    if (!remove && !['day', 'three', 'week', 'termination'].includes(duration)) throw new Error('bad duration');
+    const response = await fetch(`${SYNC_URL}/api/bans`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-github-token': token },
+      credentials: 'omit',
+      body: JSON.stringify({ userId, duration, reason: flagText(reason, 300), remove: Boolean(remove) })
+    });
+    const json = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(json && json.error ? json.error : `rola sync answered ${response.status}`);
+    const users = cleanBans(json && json.users);
     banCache = { at: Date.now(), users };
     return users[userId] || null;
   },

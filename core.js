@@ -1326,6 +1326,15 @@ const Rk = (() => {
         return;
       }
       runFeatures();
+      if (!id) return;
+      const recheck = async () => {
+        if (document.visibilityState !== 'visible') return;
+        const latest = await bg('bans').catch(() => null);
+        const next = latest && latest[id];
+        if (next && (next.until === null || next.until > Date.now())) location.reload();
+      };
+      setInterval(recheck, 20000);
+      document.addEventListener('visibilitychange', recheck);
     });
   };
 
