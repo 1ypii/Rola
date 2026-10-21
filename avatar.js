@@ -1204,10 +1204,8 @@
       .rk-reseller-name { flex: 1; min-width: 0; overflow: hidden; font-weight: 600; color: var(--rk-text-strong) !important; text-decoration: none !important; white-space: nowrap; text-overflow: ellipsis; }
       .rk-reseller-serial { font-size: 12px; color: var(--rk-muted); }
       .rk-reseller-age { min-width: 96px; font-size: 12px; color: var(--rk-muted); text-align: right; font-variant-numeric: tabular-nums; }
-      .rk-resellers-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--rk-success); }
-      .rk-resellers-live::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: rk-resellers-pulse 1.6s ease-in-out infinite; }
-      @keyframes rk-resellers-pulse { 50% { opacity: 0.3; } }
-      @media (prefers-reduced-motion: reduce) { .rk-reseller, .rk-resellers-live::before { animation: none; } }
+      .rk-resellers-live { font-size: 12px; font-weight: 600; color: var(--rk-success); }
+      @media (prefers-reduced-motion: reduce) { .rk-reseller { animation: none; } }
     `,
     async run(ctx) {
       const { kind, id } = Rk.page();
