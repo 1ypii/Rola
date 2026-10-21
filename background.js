@@ -329,7 +329,7 @@ const pollUnfriends = async (userId, state) => {
   const time = Date.now();
   const entries = removed.map(id => {
     const user = names.get(id) || {};
-    return { userId: id, name: cleanText(user.name, 40), displayName: cleanText(user.displayName || user.name, 60), banned: !activeIds.has(id), time };
+    return { userId: id, name: cleanText(user.name, 40), displayName: cleanText(user.displayName || user.name, 60), banned: !activeIds.has(id), time, owner: userId };
   });
   const log = (await chrome.storage.local.get(UNFRIENDS_KEY))[UNFRIENDS_KEY];
   await chrome.storage.local.set({ [UNFRIENDS_KEY]: [...entries, ...(Array.isArray(log) ? log : [])].slice(0, 100) });
@@ -443,12 +443,15 @@ const pollPlaytime = async (userId, state) => {
   state.playing = universe ? { universe, time: now } : null;
   if (!universe || !last || last.universe !== universe) return;
   const minutes = Math.min(now - last.time, 2 * 60 * 1000) / 60000;
-  const stored = (await chrome.storage.local.get(PLAYTIME_KEY))[PLAYTIME_KEY];
+  const key = `${PLAYTIME_KEY}:${userId}`;
+  const saved = await chrome.storage.local.get([key, PLAYTIME_KEY]);
+  const stored = saved[key] || saved[PLAYTIME_KEY];
+  if (!saved[key] && saved[PLAYTIME_KEY]) await chrome.storage.local.remove(PLAYTIME_KEY);
   const games = stored && typeof stored === 'object' ? stored : {};
   const game = games[universe] && typeof games[universe] === 'object' ? games[universe] : { minutes: 0 };
   games[universe] = { minutes: (Number(game.minutes) || 0) + minutes, placeId: entry.rootPlaceId || entry.placeId || game.placeId || null, name: cleanText(entry.lastLocation || game.name, 120), last: now };
   const kept = Object.entries(games).sort((a, b) => (b[1].last || 0) - (a[1].last || 0)).slice(0, 200);
-  await chrome.storage.local.set({ [PLAYTIME_KEY]: Object.fromEntries(kept) });
+  await chrome.storage.local.set({ [key]: Object.fromEntries(kept) });
 };
 
 const pollDrops = async state => {
@@ -866,6 +869,11 @@ const saveFlag = async ({ userId, reason, note, remove } = {}) => {
   return list;
 };
 
+const currentUserId = async () => {
+  const me = await robloxRequest('https://users.roblox.com/v1/users/authenticated').catch(() => null);
+  return me && Number.isSafeInteger(me.id) ? me.id : null;
+};
+
 const handlers = {
   values: () => loadValues(),
   notify: payload => {
@@ -884,11 +892,15 @@ const handlers = {
   sound: payload => playSound(payload).then(() => true),
   music: () => syncMusic(),
   unfriends: async () => {
-    const log = (await chrome.storage.local.get(UNFRIENDS_KEY))[UNFRIENDS_KEY];
-    return Array.isArray(log) ? log : [];
+    const [log, me] = await Promise.all([chrome.storage.local.get(UNFRIENDS_KEY).then(saved => saved[UNFRIENDS_KEY]), currentUserId()]);
+    return (Array.isArray(log) ? log : []).filter(entry => entry && (!entry.owner || entry.owner === me));
   },
   playtime: async () => {
-    const games = (await chrome.storage.local.get(PLAYTIME_KEY))[PLAYTIME_KEY];
+    const me = await currentUserId();
+    if (!me) return {};
+    const key = `${PLAYTIME_KEY}:${me}`;
+    const saved = await chrome.storage.local.get([key, PLAYTIME_KEY]);
+    const games = saved[key] || saved[PLAYTIME_KEY];
     return games && typeof games === 'object' ? games : {};
   },
   terms: async () => {

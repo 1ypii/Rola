@@ -670,17 +670,40 @@ const Rk = (() => {
     studio: (placeId, universe) => dispatchLaunch({ kind: 'studio', placeId: Number(placeId), universeId: Number(universe) })
   };
 
+  const ACCOUNT_KEYS = new Set(['friends.best', 'friends.favorites', 'nicknames', 'avatar.pinnedOutfits', 'avatar.customPose', 'tools.achievements', 'trading.valueSnapshots', 'trading.robuxHistory']);
+
+  const accountId = () => {
+    const meta = document.querySelector('meta[name="user-data"]');
+    const id = meta ? Number(meta.getAttribute('data-userid')) : NaN;
+    return isId(id) ? id : null;
+  };
+
+  const scoped = key => {
+    if (!ACCOUNT_KEYS.has(key)) return key;
+    const id = accountId();
+    if (!id) return key;
+    const own = `${key}#${id}`;
+    if (!hasOwn(data, own) && hasOwn(data, key)) {
+      data[own] = data[key];
+      delete data[key];
+      persist({ [DATA_KEY]: data });
+    }
+    return own;
+  };
+
   const storeApi = {
     get(key, fallback) {
-      return hasOwn(data, key) ? data[key] : fallback;
+      const real = scoped(key);
+      return hasOwn(data, real) ? data[real] : fallback;
     },
     set(key, value) {
-      data[key] = value;
+      data[scoped(key)] = value;
       persist({ [DATA_KEY]: data });
     },
     remove(key) {
-      if (!hasOwn(data, key)) return;
-      delete data[key];
+      const real = scoped(key);
+      if (!hasOwn(data, real)) return;
+      delete data[real];
       persist({ [DATA_KEY]: data });
     },
     keys() {
@@ -1273,7 +1296,7 @@ const Rk = (() => {
       report('storage', err);
     }
     resolveReady();
-    runFeatures();
+    Promise.race([waitFor('meta[name="user-data"]'), domReady]).then(runFeatures);
   };
 
   return {
