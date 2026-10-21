@@ -945,6 +945,29 @@ const saveFlag = async ({ userId, reason, note, remove } = {}) => {
   return list;
 };
 
+const SYNC_URL = 'https://rola-sync.blessedlua.workers.dev';
+const sharedBanners = new Map();
+
+const syncRequest = async (path, { method = 'GET', body, token } = {}) => {
+  const headers = {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (token) headers.authorization = `Bearer ${token}`;
+  const response = await fetch(`${SYNC_URL}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: 'omit' });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data && data.error ? data.error : `rola sync answered ${response.status}`);
+  return data;
+};
+
+const syncToken = async userId => {
+  const key = `rk:sync:${userId}`;
+  const token = (await chrome.storage.local.get(key))[key];
+  return typeof token === 'string' && /^[0-9a-f]{64}$/.test(token) ? token : null;
+};
+
+const checkSyncUser = userId => {
+  if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad user id');
+};
+
 let banCache = null;
 
 const cleanBans = users => {
@@ -1003,6 +1026,47 @@ const handlers = {
   flagged: () => flaggedUsers(),
   admins: () => adminAccounts(),
   bans: () => rolaBans(),
+  'sync-start': async ({ userId } = {}) => {
+    checkSyncUser(userId);
+    return syncRequest('/api/verify/start', { method: 'POST', body: { userId } });
+  },
+  'sync-check': async ({ userId } = {}) => {
+    checkSyncUser(userId);
+    const { token } = await syncRequest('/api/verify/check', { method: 'POST', body: { userId } });
+    await chrome.storage.local.set({ [`rk:sync:${userId}`]: token });
+    return { linked: true };
+  },
+  'sync-linked': async ({ userId } = {}) => {
+    checkSyncUser(userId);
+    return Boolean(await syncToken(userId));
+  },
+  'sync-banner': async ({ userId, image } = {}) => {
+    checkSyncUser(userId);
+    if (image !== null && typeof image !== 'string') throw new Error('bad banner');
+    const token = await syncToken(userId);
+    if (!token) throw new Error('not linked');
+    try {
+      return await syncRequest('/api/banner', { method: 'PUT', body: { image }, token });
+    } catch (err) {
+      if (err.message === 'not linked') await chrome.storage.local.remove(`rk:sync:${userId}`);
+      throw err;
+    }
+  },
+  'shared-banner': async ({ userId } = {}) => {
+    checkSyncUser(userId);
+    const profile = await syncRequest(`/api/profile/${userId}`);
+    if (!profile || !Number.isFinite(profile.banner)) return { image: null };
+    const cached = sharedBanners.get(userId);
+    if (cached && cached.version === profile.banner) return { image: cached.image };
+    const response = await fetch(`${SYNC_URL}/api/image/${userId}?v=${profile.banner}`, { credentials: 'omit' });
+    if (!response.ok) return { image: null };
+    const type = response.headers.get('content-type') || '';
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(type)) return { image: null };
+    const image = `data:${type};base64,${encodeBytes(new Uint8Array(await response.arrayBuffer()))}`;
+    if (sharedBanners.size > 30) sharedBanners.delete(sharedBanners.keys().next().value);
+    sharedBanners.set(userId, { version: profile.banner, image });
+    return { image };
+  },
   'save-ban': async ({ userId, duration, reason, remove } = {}) => {
     if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad ban request');
     const token = (await chrome.storage.local.get('rk:gh-token'))['rk:gh-token'];

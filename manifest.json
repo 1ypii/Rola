@@ -32,7 +32,8 @@
   "host_permissions": [
     "https://*.roblox.com/*",
     "https://api.rolimons.com/*",
-    "https://robloxverifieds.com/*"
+    "https://robloxverifieds.com/*",
+    "https://rola-sync.blessedlua.workers.dev/*"
   ],
   "content_scripts": [
     {

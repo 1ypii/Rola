@@ -1397,103 +1397,214 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
     }
   });
 
-  Rk.feature({
-    id: 'profiles.banner',
-    category: 'profiles',
-    name: 'Profile banner',
-    description: 'Shows a banner image or gif above your own profile and on your avatar page. Paste a link, choose a file or drop one in. Only you can see it.',
-    default: false,
-    pages: ['profile', 'avatar'],
-    options: [
-      { key: 'image', label: 'Banner image or gif', type: 'image', default: '' },
-      { key: 'height', label: 'Height (px)', type: 'number', min: 80, max: 400, step: 10, default: 200 },
-      { key: 'position', label: 'Image focus', type: 'select', choices: [['top', 'Top'], ['center', 'Center'], ['bottom', 'Bottom']], default: 'center' }
-    ],
-    css: `
+  const bannerCss = `
 .rk-profile-banner { position: relative; flex: 0 0 100%; width: 100%; margin: 0 0 16px; overflow: hidden; border-radius: var(--rk-radius-l); background: var(--rk-shift); transition: height var(--rk-fast) var(--rk-ease); }
 .rk-profile-banner > img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 400ms ease; }
 .rk-profile-banner > img.rk-profile-banner-loaded { opacity: 1; }
 .rk-banner-host { background-image: var(--rk-profile-banner) !important; background-size: cover !important; background-repeat: no-repeat !important; background-position: var(--rk-profile-banner-focus, center) !important; }
 .rk-banner-host :is(.thumbnail-3d-container, .thumbnail-2d-container, [class*="thumbnail-holder"], canvas, .rk-banner-clear) { background: transparent !important; }
-`,
+`;
+
+  const bannerPainter = () => {
+    const image = el('img', { alt: '', decoding: 'async' });
+    const banner = el('div', { class: 'rk-profile-banner rk-hidden' }, image);
+    image.addEventListener('load', () => image.classList.add('rk-profile-banner-loaded'));
+    image.addEventListener('error', () => banner.classList.add('rk-hidden'));
+    let data = null;
+    let focus = 'center';
+    let host = null;
+    const painted = node => {
+      const style = getComputedStyle(node);
+      return style.backgroundImage !== 'none' || !/rgba\(0, 0, 0, 0\)|transparent/.test(style.backgroundColor);
+    };
+    const large = node => {
+      const rect = node.getBoundingClientRect();
+      return rect.width >= 300 && rect.height >= 150;
+    };
+    const clearInside = () => {
+      if (!host || !data) return;
+      for (const node of host.querySelectorAll('*')) {
+        if (node.classList.contains('rk-banner-clear') || node.matches('button, a, img, canvas, svg, svg *')) continue;
+        if (large(node) && painted(node)) node.classList.add('rk-banner-clear');
+      }
+    };
+    const paint = () => {
+      if (host) {
+        host.classList.toggle('rk-banner-host', Boolean(data));
+        clearInside();
+        if (data) {
+          host.style.setProperty('--rk-profile-banner', `url("${data}")`);
+          host.style.setProperty('--rk-profile-banner-focus', `center ${focus}`);
+        } else {
+          host.style.removeProperty('--rk-profile-banner');
+        }
+      }
+      banner.classList.toggle('rk-hidden', !data || Boolean(host));
+    };
+    return {
+      set(next, { height = 200, position = 'center' } = {}) {
+        focus = position;
+        banner.style.height = `${height}px`;
+        image.style.objectPosition = `center ${position}`;
+        if (next !== data) {
+          data = next;
+          image.classList.remove('rk-profile-banner-loaded');
+          if (data) image.src = data;
+          else image.removeAttribute('src');
+        }
+        paint();
+      },
+      mountAvatar() {
+        Rk.observe('#avatar-react-container', container => {
+          const parent = container.parentElement;
+          if (parent && parent.firstElementChild !== banner) parent.prepend(banner);
+        });
+      },
+      mountProfile() {
+        Rk.observe('.user-profile-header', header => {
+          if (banner.nextElementSibling !== header) header.before(banner);
+        });
+        Rk.observe('.thumbnail-3d-container, .avatar-toggle-button, .enable-three-dee', node => {
+          if (host && host.isConnected) return;
+          let box = node;
+          for (let depth = 0; depth < 6 && box.parentElement; depth += 1) {
+            box = box.parentElement;
+            const rect = box.getBoundingClientRect();
+            if (rect.width >= 300 && rect.height >= 150) break;
+          }
+          if (box === document.body || box.contains(document.querySelector('.user-profile-header'))) return;
+          host = [box, ...box.querySelectorAll('*')].find(item => !item.matches('button, a, img, canvas, svg, svg *') && large(item) && painted(item)) || box;
+          new MutationObserver(clearInside).observe(host, { childList: true, subtree: true });
+          paint();
+        });
+      }
+    };
+  };
+
+  const linkRolaAccount = async me => {
+    const start = await Rk.bg('sync-start', { userId: me.id }).catch(err => ({ error: err && err.message }));
+    if (!start || !start.code) {
+      ui.toast(`Could not start linking: ${start && start.error ? start.error : 'Rola sync is unreachable'}`, { tone: 'danger', duration: 7000 });
+      return false;
+    }
+    return new Promise(resolve => {
+      let done = false;
+      const finish = value => {
+        if (done) return;
+        done = true;
+        resolve(value);
+        handle.close();
+      };
+      const check = ui.button('I added it, check now', { variant: 'primary', onClick: async () => {
+        check.disabled = true;
+        const result = await Rk.bg('sync-check', { userId: me.id }).catch(err => ({ error: err && err.message }));
+        check.disabled = false;
+        if (result && result.linked) {
+          ui.toast('Account linked, you can remove the code from your About now', { tone: 'success', duration: 6000 });
+          finish(true);
+        } else {
+          ui.toast(result && result.error ? result.error : 'Could not check yet, try again', { tone: 'warning', duration: 6000 });
+        }
+      } });
+      const handle = ui.modal({
+        title: 'Link your Roblox account',
+        width: 460,
+        content: [
+          el('p', { class: 'rk-modal-text' }, 'To share your banner with other Rola users, prove this is your account once. Paste this code anywhere in your Roblox About, save it, then press check. You can remove it right after.'),
+          el('div', { class: 'rk-inline' }, el('code', { class: 'rk-strong', style: { fontSize: '18px' } }, start.code), ui.button('Copy', { variant: 'ghost', icon: 'copy', onClick: () => ui.copy(start.code, 'Code copied') })),
+          el('p', { class: 'rk-modal-text rk-muted' }, 'The code works for 15 minutes.'),
+          el('a', { href: `/users/${me.id}/profile`, target: '_blank' }, 'Open your profile to edit your About')
+        ],
+        actions: [ui.button('Cancel', { variant: 'secondary', size: 'md', onClick: () => finish(false) }), check],
+        onClose: () => finish(false)
+      });
+    });
+  };
+
+  Rk.feature({
+    id: 'profiles.banner',
+    category: 'profiles',
+    name: 'Profile banner',
+    description: 'Shows a banner image or gif behind your avatar on your profile and on your avatar page. Turn on sharing so other Rola users see it on your profile too.',
+    default: false,
+    pages: ['profile', 'avatar'],
+    options: [
+      { key: 'image', label: 'Banner image or gif', type: 'image', default: '' },
+      { key: 'height', label: 'Height (px)', type: 'number', min: 80, max: 400, step: 10, default: 200 },
+      { key: 'position', label: 'Image focus', type: 'select', choices: [['top', 'Top'], ['center', 'Center'], ['bottom', 'Bottom']], default: 'center' },
+      { key: 'share', label: 'Show my banner to other Rola users', type: 'toggle', default: false }
+    ],
+    css: bannerCss,
     async run(ctx) {
       const onAvatar = Rk.page().type === 'avatar';
       if (!onAvatar && !await ownProfile()) return;
-      const image = el('img', { alt: '', decoding: 'async' });
-      const banner = el('div', { class: 'rk-profile-banner rk-hidden' }, image);
-      image.addEventListener('load', () => image.classList.add('rk-profile-banner-loaded'));
-      image.addEventListener('error', () => banner.classList.add('rk-hidden'));
+      const me = await Rk.me();
+      const painter = bannerPainter();
       let token = null;
       let data = null;
-      let host = null;
-      const painted = el => {
-        const style = getComputedStyle(el);
-        return style.backgroundImage !== 'none' || !/rgba\(0, 0, 0, 0\)|transparent/.test(style.backgroundColor);
-      };
-      const large = el => {
-        const rect = el.getBoundingClientRect();
-        return rect.width >= 300 && rect.height >= 150;
-      };
-      const clearInside = () => {
-        if (!host || !data) return;
-        for (const node of host.querySelectorAll('*')) {
-          if (node.classList.contains('rk-banner-clear') || node.matches('button, a, img, canvas, svg, svg *')) continue;
-          if (large(node) && painted(node)) node.classList.add('rk-banner-clear');
-        }
-      };
-      const paint = () => {
-        if (host) {
-          host.classList.toggle('rk-banner-host', Boolean(data));
-          clearInside();
-          if (data) {
-            host.style.setProperty('--rk-profile-banner', `url("${data}")`);
-            host.style.setProperty('--rk-profile-banner-focus', `center ${ctx.option('position')}`);
-          } else {
-            host.style.removeProperty('--rk-profile-banner');
+      const sharedKey = me ? `rk-banner-shared:${me.id}` : '';
+      let shared = null;
+      try {
+        shared = localStorage.getItem(sharedKey);
+      } catch {}
+      let sharing = false;
+      const share = async () => {
+        if (!me || sharing || !Rk.isEnabled(ctx.id)) return;
+        const wanted = ctx.option('share') ? `${token}` : 'off';
+        if (wanted === shared) return;
+        sharing = true;
+        try {
+          const linked = await Rk.bg('sync-linked', { userId: me.id }).catch(() => false);
+          if (!linked && (!ctx.option('share') || !await linkRolaAccount(me))) return;
+          const result = await Rk.bg('sync-banner', { userId: me.id, image: ctx.option('share') ? data : null }).catch(err => ({ error: err && err.message }));
+          if (result && result.error) {
+            ui.toast(`Could not share your banner: ${result.error}`, { tone: 'danger', duration: 7000 });
+            return;
           }
+          shared = wanted;
+          try {
+            localStorage.setItem(sharedKey, wanted);
+          } catch {}
+          if (ctx.option('share')) ui.toast(data ? 'Other Rola users can now see your banner' : 'Your shared banner was removed', { tone: 'success' });
+        } finally {
+          sharing = false;
         }
-        banner.classList.toggle('rk-hidden', !data || Boolean(host));
       };
       const apply = async () => {
-        banner.style.height = `${ctx.option('height')}px`;
-        image.style.objectPosition = `center ${ctx.option('position')}`;
         const next = Rk.isEnabled(ctx.id) ? ctx.option('image') : '';
         if (next !== token) {
           token = next;
           const loaded = next ? await Rk.images.get(ctx.id, 'image') : null;
           if (token !== next) return;
           data = loaded;
-          image.classList.remove('rk-profile-banner-loaded');
-          if (data) image.src = data;
-          else image.removeAttribute('src');
         }
-        paint();
+        painter.set(data, { height: ctx.option('height'), position: ctx.option('position') });
+        if (!onAvatar) share();
       };
       apply();
       Rk.onSettings(apply);
-      if (onAvatar) {
-        Rk.observe('#avatar-react-container', container => {
-          const parent = container.parentElement;
-          if (parent && parent.firstElementChild !== banner) parent.prepend(banner);
-        });
-        return;
-      }
-      Rk.observe('.user-profile-header', header => {
-        if (banner.nextElementSibling !== header) header.before(banner);
-      });
-      Rk.observe('.thumbnail-3d-container, .avatar-toggle-button, .enable-three-dee', node => {
-        if (host && host.isConnected) return;
-        let box = node;
-        for (let depth = 0; depth < 6 && box.parentElement; depth += 1) {
-          box = box.parentElement;
-          const rect = box.getBoundingClientRect();
-          if (rect.width >= 300 && rect.height >= 150) break;
-        }
-        if (box === document.body || box.contains(document.querySelector('.user-profile-header'))) return;
-        host = [box, ...box.querySelectorAll('*')].find(node => !node.matches('button, a, img, canvas, svg, svg *') && large(node) && painted(node)) || box;
-        new MutationObserver(clearInside).observe(host, { childList: true, subtree: true });
-        paint();
-      });
+      if (onAvatar) painter.mountAvatar();
+      else painter.mountProfile();
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.sharedBanners',
+    category: 'profiles',
+    name: 'Banners from other Rola users',
+    description: 'Shows the banners other Rola users chose to share on their profiles.',
+    default: true,
+    pages: PROFILE,
+    css: bannerCss,
+    async run(ctx) {
+      const id = profileId();
+      if (!id || await ownProfile()) return;
+      const result = await Rk.bg('shared-banner', { userId: id }).catch(() => null);
+      if (!result || !result.image || !Rk.isEnabled(ctx.id)) return;
+      const painter = bannerPainter();
+      painter.set(result.image);
+      painter.mountProfile();
+      Rk.onSettings(() => painter.set(Rk.isEnabled(ctx.id) ? result.image : null));
     }
   });
 
