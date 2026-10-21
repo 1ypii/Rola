@@ -919,7 +919,7 @@ const saveBadges = async ({ userId, badges } = {}) => {
   return users;
 };
 
-const FLAGS_KEY = 'rkbg:flags';
+const FLAGS_KEY = 'rkbg:flags2';
 
 const flagText = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
@@ -956,7 +956,34 @@ const verifiedsPage = async page => {
   return hydrate(0);
 };
 
+let rolaFlagCache = null;
+
+const rolaFlags = async () => {
+  if (rolaFlagCache && Date.now() - rolaFlagCache.at < 20000) return rolaFlagCache.users;
+  const json = await syncRequest('/api/flags').catch(() => null);
+  if (!json && rolaFlagCache) return rolaFlagCache.users;
+  const users = {};
+  for (const [id, list] of Object.entries(json && json.users && typeof json.users === 'object' ? json.users : {})) {
+    if (/^\d{1,15}$/.test(id)) users[id] = cleanFlagList(list);
+  }
+  rolaFlagCache = { at: Date.now(), users };
+  return users;
+};
+
 const flaggedUsers = async () => {
+  const [verifieds, rola] = await Promise.all([verifiedsFlags(), rolaFlags()]);
+  const users = {};
+  for (const [id, entry] of Object.entries(verifieds)) users[id] = { name: entry.name, flags: [...entry.flags] };
+  for (const [id, list] of Object.entries(rola)) {
+    if (!list.length) continue;
+    const entry = users[id] || { name: '', flags: [] };
+    entry.flags.push(...list.map(flag => ({ ...flag, source: 'Rola' })));
+    users[id] = entry;
+  }
+  return users;
+};
+
+const verifiedsFlags = async () => {
   const saved = (await chrome.storage.local.get(FLAGS_KEY))[FLAGS_KEY];
   if (saved && Date.now() - saved.time < 3600000 && saved.users && typeof saved.users === 'object') return saved.users;
   const users = {};
@@ -980,8 +1007,6 @@ const flaggedUsers = async () => {
       }
     }
   } catch {}
-  const rola = await fetch('https://raw.githubusercontent.com/1ypii/Rola/main/flags.json', { credentials: 'omit', cache: 'no-cache' }).then(res => (res.ok ? res.json() : null)).catch(() => null);
-  for (const [id, list] of Object.entries(rola && rola.users && typeof rola.users === 'object' ? rola.users : {})) add(id, '', 'Rola', cleanFlagList(list));
   await chrome.storage.local.set({ [FLAGS_KEY]: { time: Date.now(), users } });
   return users;
 };
@@ -1003,19 +1028,11 @@ const writeRepoFile = async (path, file, data) => {
 
 const saveFlag = async ({ userId, reason, note, remove } = {}) => {
   if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad flag request');
-  const token = (await chrome.storage.local.get('rk:gh-token'))['rk:gh-token'];
-  if (typeof token !== 'string' || !token) throw new Error('missing token');
-  const file = await repoFile('flags.json', token);
-  const users = file.data.users && typeof file.data.users === 'object' ? file.data.users : {};
-  const list = cleanFlagList(users[userId]);
-  if (Number.isInteger(remove)) list.splice(remove, 1);
-  else if (flagText(reason, 80)) list.push({ reason: flagText(reason, 80), note: flagText(note, 600), at: Date.now() });
-  else throw new Error('missing reason');
-  if (list.length) users[userId] = list;
-  else delete users[userId];
-  await writeRepoFile('flags.json', file, { users });
-  await chrome.storage.local.remove(FLAGS_KEY);
-  return list;
+  if (!Number.isInteger(remove) && !flagText(reason, 80)) throw new Error('missing reason');
+  const body = Number.isInteger(remove) ? { userId, remove } : { userId, reason: flagText(reason, 80), note: flagText(note, 600) };
+  const json = await adminRequest('/api/flags', { method: 'PUT', body });
+  rolaFlagCache = null;
+  return cleanFlagList(json && json.list);
 };
 
 const SYNC_URL = 'https://rola-sync.blessedlua.workers.dev';
@@ -1286,10 +1303,18 @@ const handlers = {
     await adminRequest('/api/admin/set', { method: 'POST', body: remove ? { username: name, remove: true } : { username: name, password } });
     return admins.map(entry => entry.username);
   },
-  'save-flag': async payload => {
-    const result = await saveFlag(payload || {});
-    adminRequest('/api/log', { method: 'POST', body: { action: payload.remove ? 'unflag' : 'flag', target: String(payload.userId), detail: payload.remove ? '' : String(payload.reason || '') } }).catch(() => {});
-    return result;
+  'save-flag': payload => saveFlag(payload || {}),
+  'check-audio': async ({ assetId, shared } = {}) => {
+    const id = String(assetId || '').trim();
+    if (!/^\d{1,20}$/.test(id)) throw new Error('an audio id is only numbers');
+    if (shared) return syncRequest(`/api/audio?id=${id}`);
+    const asset = await robloxRequest(`https://economy.roblox.com/v2/assets/${id}/details`).catch(() => null);
+    if (!asset) throw new Error('could not find that asset');
+    if (asset.AssetTypeId !== 3) throw new Error('that id is not a roblox audio');
+    audioUrls.delete(id);
+    const src = await audioUrl(id).catch(() => null);
+    if (!src) throw new Error('that audio is private or not approved, pick a public one');
+    return { name: typeof asset.Name === 'string' ? cleanText(asset.Name, 100) : '' };
   },
   'save-badges': async payload => {
     const result = await saveBadges(payload || {});

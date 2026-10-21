@@ -543,7 +543,7 @@ button.rk-profile-chip:active { transform: scale(0.97); }
     default: false,
     pages: PROFILE,
     options: [
-      { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Roblox audio id', default: '' }
+      { key: 'assetId', label: 'Audio asset id', type: 'audio', shared: true, placeholder: 'Public Roblox audio id', default: '' }
     ],
     async run(ctx) {
       if (!await ownProfile()) return;
@@ -1031,7 +1031,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
 .rk-flag-pop a { color: var(--rk-accent); font-size: 12px; }
 `,
     async run(ctx) {
-      const flags = await Rk.bg('flagged').catch(() => null);
+      let flags = await Rk.bg('flagged').catch(() => null);
       if (!flags || typeof flags !== 'object') return;
       const pop = el('div', { class: 'rk-flag-pop', role: 'dialog', 'aria-label': 'Why this user is flagged' });
       let owner = null;
@@ -1120,6 +1120,7 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
         if (id && flags[id]) {
           const button = flagButton(id);
           const place = () => {
+            if (!flags[id]) return;
             const name = document.getElementById('profile-header-title-container-name');
             if (!name || !name.parentElement) return;
             const badges = name.parentElement.querySelector(':scope > span.inline-flex.shrink-0');
@@ -1153,6 +1154,19 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
           for (const button of document.querySelectorAll('.rk-flag')) button.remove();
         }
       });
+      const refresh = async () => {
+        if (document.visibilityState !== 'visible' || !Rk.isEnabled(ctx.id)) return;
+        const next = await Rk.bg('flagged').catch(() => null);
+        if (!next || typeof next !== 'object') return;
+        flags = next;
+        for (const button of document.querySelectorAll('.rk-flag')) {
+          if (flags[button.dataset.userId]) continue;
+          if (owner === button) close();
+          button.remove();
+        }
+      };
+      setInterval(refresh, 20000);
+      document.addEventListener('visibilitychange', refresh);
     }
   });
 

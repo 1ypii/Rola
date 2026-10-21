@@ -81,6 +81,8 @@ const Rk = (() => {
         return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
       case 'image':
         return typeof value === 'string' && value.length <= 40;
+      case 'audio':
+        return typeof value === 'string' && /^\d{0,20}$/.test(value);
       default:
         return false;
     }

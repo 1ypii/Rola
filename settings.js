@@ -586,6 +586,36 @@
       return field;
     }
     if (def.type === 'image') return imageControl(entry, def);
+    if (def.type === 'audio') {
+      const field = ui.input({ value, maxLength: 20, placeholder: def.placeholder || 'Roblox audio id' });
+      const status = el('span', { class: 'rk-image-status' });
+      const save = ui.button('Save', { variant: 'primary', onClick: async () => {
+        const id = field.value.trim();
+        if (!id) {
+          withLocalChange(() => Rk.setOption(entry.id, def.key, ''));
+          status.textContent = 'Cleared';
+          return;
+        }
+        save.disabled = true;
+        status.textContent = 'Checking';
+        try {
+          const audio = await Rk.bg('check-audio', { assetId: id, shared: Boolean(def.shared) });
+          withLocalChange(() => Rk.setOption(entry.id, def.key, id));
+          status.textContent = audio && audio.name ? `Saved: ${audio.name}` : 'Saved';
+        } catch (err) {
+          status.textContent = '';
+          ui.toast(err && err.message ? err.message : 'Could not check that audio', { tone: 'danger', duration: 7000 });
+        }
+        save.disabled = false;
+      } });
+      field.addEventListener('keydown', event => {
+        if (event.key === 'Enter') save.click();
+      });
+      field.addEventListener('input', () => {
+        status.textContent = field.value.trim() === Rk.option(entry.id, def.key) ? '' : 'Not saved';
+      });
+      return el('div', { class: 'rk-inline' }, field, save, status);
+    }
     if (def.type === 'color') {
       const field = el('input', { type: 'color', 'aria-label': def.label });
       field.value = value;

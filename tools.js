@@ -1933,7 +1933,7 @@
     name: 'Notification sound',
     description: 'Plays a sound with alerts and reminders. Put a Roblox audio id to use it instead of the default chime.',
     options: [
-      { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Default chime', default: '' }
+      { key: 'assetId', label: 'Audio asset id', type: 'audio', placeholder: 'Default chime', default: '' }
     ]
   });
 
@@ -1960,7 +1960,7 @@
     description: 'Plays a Roblox audio when a purchase fails because you do not have enough Robux.',
     default: false,
     options: [
-      { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Roblox audio id', default: '' }
+      { key: 'assetId', label: 'Audio asset id', type: 'audio', placeholder: 'Roblox audio id', default: '' }
     ],
     run(ctx) {
       const failed = /insufficient (robux|funds)|not enough robux|need more robux|you need .*more robux|buy more robux|get more robux|purchase failed, insufficient|need .* more to purchase/i;
@@ -2025,7 +2025,7 @@
     description: 'Loops a Roblox audio while you have the site open. It keeps playing between pages and stops when you close the last Roblox tab.',
     default: false,
     options: [
-      { key: 'assetId', label: 'Audio asset id', type: 'text', maxLength: 20, placeholder: 'Roblox audio id', default: '' },
+      { key: 'assetId', label: 'Audio asset id', type: 'audio', placeholder: 'Roblox audio id', default: '' },
       { key: 'volume', label: 'Volume', type: 'number', min: 0, max: 100, step: 5, default: 40 }
     ],
     run(ctx) {
@@ -2057,7 +2057,7 @@
     default: false,
     options: [
       { key: 'users', label: 'Users to watch (usernames or ids, comma separated)', type: 'text', maxLength: 2000, placeholder: 'Builderman, 156', default: '' },
-      { key: 'assetId', label: 'Sound audio asset id', type: 'text', maxLength: 20, placeholder: 'Default sound', default: '' }
+      { key: 'assetId', label: 'Sound audio asset id', type: 'audio', placeholder: 'Default sound', default: '' }
     ],
     css: `
       .rk-tools-terms-add { display: flex; gap: 8px; margin: 4px 0 8px; }
