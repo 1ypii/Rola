@@ -2083,14 +2083,88 @@
     id: 'avatar.editorSearch',
     category: 'avatar',
     name: 'Search your items',
-    description: 'Adds a search box that filters the item cards in the avatar editor as you type.',
+    description: 'Adds a search box to the avatar editor that filters the item cards and finds anything in your whole inventory, so you can wear it in one click.',
     pages: ['avatar'],
     css: `
       .rk-avatar-toolbar:empty { display: none !important; }
       .rk-avatar-toolbar .rk-avatar-search { margin: 0 !important; }
+      .rk-avatar-found { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 0 0 12px; }
+      .rk-avatar-found:empty { display: none; }
+      .rk-avatar-found .rk-avatar-tile { cursor: pointer; }
+      .rk-avatar-found-note { grid-column: 1 / -1; font-size: 12px; color: var(--rk-muted); }
     `,
     run() {
       let query = '';
+      const WEARABLE_TYPES = ['Hat', 'HairAccessory', 'FaceAccessory', 'NeckAccessory', 'ShoulderAccessory', 'FrontAccessory', 'BackAccessory', 'WaistAccessory', 'TShirt', 'Shirt', 'Pants', 'Face', 'Head', 'DynamicHead', 'Torso', 'LeftArm', 'RightArm', 'LeftLeg', 'RightLeg', 'Gear', 'TShirtAccessory', 'ShirtAccessory', 'PantsAccessory', 'JacketAccessory', 'SweaterAccessory', 'ShortsAccessory', 'LeftShoeAccessory', 'RightShoeAccessory', 'DressSkirtAccessory'];
+      const SINGLE_TYPES = new Set([2, 11, 12, 17, 18, 19, 27, 28, 29, 30, 31, 79]);
+      const TYPE_IDS = { TShirt: 2, Hat: 8, Shirt: 11, Pants: 12, Head: 17, Face: 18, Gear: 19, Torso: 27, RightArm: 28, LeftArm: 29, LeftLeg: 30, RightLeg: 31, HairAccessory: 41, FaceAccessory: 42, NeckAccessory: 43, ShoulderAccessory: 44, FrontAccessory: 45, BackAccessory: 46, WaistAccessory: 47, DynamicHead: 79 };
+      let inventory = null;
+      let searchTimer = 0;
+      const found = el('div', { class: 'rk-avatar-found' });
+      const loadInventory = () => {
+        if (inventory) return inventory;
+        inventory = (async () => {
+          const me = await Rk.me();
+          if (!me) return [];
+          const items = [];
+          let cursor = '';
+          for (let page = 0; page < 10; page += 1) {
+            const json = await Rk.api.get(`https://inventory.roblox.com/v2/users/${me.id}/inventory?assetTypes=${WEARABLE_TYPES.join(',')}&limit=100&sortOrder=Desc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`).catch(() => null);
+            for (const entry of json && Array.isArray(json.data) ? json.data : []) {
+              const id = Number(entry && entry.assetId);
+              const name = str(entry && (entry.assetName || entry.name), 100);
+              if (Rk.isId(id) && name) items.push({ id, name, type: TYPE_IDS[entry.assetType] || Number(entry.assetTypeId) || 0 });
+            }
+            cursor = json && typeof json.nextPageCursor === 'string' ? json.nextPageCursor : '';
+            if (!cursor) break;
+          }
+          return items;
+        })();
+        return inventory;
+      };
+      const wearItem = async (item, tile) => {
+        const native = cards().find(card => nameOf(card).trim().toLowerCase() === item.name.toLowerCase());
+        const target = native && (native.querySelector('.item-card-thumb-container, .item-card-link, a, button') || native);
+        if (target) {
+          target.click();
+          return;
+        }
+        tile.classList.add('rk-busy');
+        try {
+          const current = await Rk.api.get(AVATAR_URL);
+          const assets = isObject(current) && Array.isArray(current.assets) ? current.assets.filter(asset => isObject(asset) && Rk.isId(asset.id) && asset.id !== item.id) : [];
+          const kept = SINGLE_TYPES.has(item.type) ? assets.filter(asset => !(isObject(asset.assetType) && asset.assetType.id === item.type)) : assets;
+          const result = await Rk.api.post('https://avatar.roblox.com/v2/avatar/set-wearing-assets', { assets: [...kept.map(asset => (isObject(asset.meta) ? { id: asset.id, meta: asset.meta } : { id: asset.id })), { id: item.id }] });
+          if (isObject(result) && result.success === false) throw new Error('wear rejected');
+          ui.toast(`Wearing ${item.name}, reload the editor to see it`, { tone: 'success' });
+        } catch {
+          ui.toast(`Could not wear ${item.name}`, { tone: 'danger' });
+        }
+        tile.classList.remove('rk-busy');
+      };
+      const searchInventory = async text => {
+        if (!text || text.length < 2) {
+          found.replaceChildren();
+          return;
+        }
+        const items = await loadInventory();
+        if (query !== text) return;
+        const hits = items.filter(item => item.name.toLowerCase().includes(text)).slice(0, 24);
+        found.replaceChildren(
+          el('div', { class: 'rk-avatar-found-note' }, hits.length ? `In your inventory (${fmt.num(hits.length)}${hits.length === 24 ? '+' : ''})` : 'Nothing in your inventory matches'),
+          ...hits.map(item => {
+            const tile = el('div', { class: 'rk-avatar-tile', role: 'button', tabindex: '0', title: `Wear ${item.name}` },
+              ui.thumb(Rk.thumb('Asset', item.id, '150x150'), { size: 96, alt: item.name }),
+              el('span', { class: 'rk-avatar-tile-name' }, item.name)
+            );
+            tile.addEventListener('click', () => wearItem(item, tile));
+            tile.addEventListener('keydown', event => {
+              if (event.key === 'Enter') wearItem(item, tile);
+            });
+            return tile;
+          })
+        );
+      };
       const count = el('span', { class: 'rk-muted', 'aria-live': 'polite' });
       const outerCard = node => node.closest('.list-item.item-card') || node;
       const nameOf = card => {
@@ -2112,6 +2186,8 @@
         const all = cards();
         const shown = all.filter(apply).length;
         count.textContent = query ? `${fmt.num(shown)} of ${fmt.num(all.length)}` : '';
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => searchInventory(query), 300);
       };
       const field = ui.input({ type: 'search', placeholder: 'Search your items', maxLength: 80, onInput: filter });
       field.setAttribute('aria-label', 'Search your items');
@@ -2126,10 +2202,10 @@
       const bar = el('div', { class: 'rk-inline rk-avatar-search', style: { display: 'flex', margin: '0 0 12px' } }, field, count);
       Rk.observe('.item-cards-stackable', grid => {
         if (grid.closest('.rk-avatar-panels') || (grid.parentElement && grid.parentElement.closest('.item-cards-stackable'))) return;
-        if (bar.nextElementSibling !== grid) grid.before(bar);
+        if (bar.nextElementSibling !== found || found.nextElementSibling !== grid) grid.before(bar, found);
       });
       Rk.domReady.then(() => {
-        if (!bar.isConnected) avatarToolbar().prepend(bar);
+        if (!bar.isConnected) avatarToolbar().prepend(bar, found);
       });
       Rk.observe(EDITOR_CARDS, node => {
         if (query && !node.closest('.rk-avatar-panels')) apply(outerCard(node));
@@ -2187,6 +2263,15 @@
       typeof playerAvatarType === 'string' ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-player-avatar-type', { playerAvatarType }) : null,
       isObject(scale) ? Rk.api.post('https://avatar.roblox.com/v1/avatar/set-scales', scale) : null
     ]);
+  };
+
+  const shuffleFrom = outfits => {
+    if (!outfits.length) return null;
+    const last = Number(Rk.store.get('avatar.lastShuffle', 0));
+    const pool = outfits.length > 1 ? outfits.filter(outfit => outfit.id !== last) : outfits;
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    Rk.store.set('avatar.lastShuffle', picked.id);
+    return picked;
   };
 
   const wearOutfit = async outfit => {
@@ -2539,9 +2624,17 @@
         const saved = await loadOutfits();
         if (!list.isConnected) return;
         const order = pinnedFirst(saved);
+        const shuffleItem = () => {
+          const shuffle = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem' }, icon('refresh', 16), el('span', null, 'Shuffle outfit'));
+          shuffle.addEventListener('click', () => {
+            const outfit = shuffleFrom(saved);
+            if (outfit) wear(outfit, shuffle);
+          });
+          return shuffle;
+        };
         const render = toggled => {
           const pins = pinnedOutfitIds();
-          list.replaceChildren(...order.map(outfit => {
+          list.replaceChildren(...(Rk.isEnabled('avatar.outfitShuffle') && saved.length > 1 ? [shuffleItem()] : []), ...order.map(outfit => {
             const isPinned = pins.includes(outfit.id);
             const name = str(outfit.name, 100) || 'Outfit';
             const item = el('button', { type: 'button', class: 'rk-menu-item', role: 'menuitem' }, ui.thumb(Rk.thumb('Outfit', outfit.id, '150x150'), { size: 36 }), el('span', null, name));
@@ -2566,6 +2659,42 @@
         if (robux) robux.before(item);
         else navbar.append(item);
       });
+    }
+  });
+
+  Rk.feature({
+    id: 'avatar.outfitShuffle',
+    category: 'avatar',
+    name: 'Outfit shuffle',
+    description: 'Adds a Shuffle outfit button to the avatar editor and the top bar outfit switcher that puts on a random saved outfit.',
+    default: false,
+    pages: ['avatar'],
+    run(ctx) {
+      const button = ui.button('Shuffle outfit', { icon: 'refresh', onClick: async () => {
+        const outfit = shuffleFrom(await userOutfits());
+        if (!outfit) {
+          ui.toast('You have no saved outfits yet', { tone: 'warning' });
+          return;
+        }
+        const name = str(outfit.name, 100) || 'outfit';
+        const matches = [...document.querySelectorAll('#costumes #avatar-items-container li')].filter(item => name && item.textContent.includes(name));
+        const target = matches.length === 1 ? matches[0].querySelector('.item-card-thumb-container, .item-card-link, a, button') || matches[0] : null;
+        if (target) {
+          target.click();
+          ui.toast(`Wearing ${name}`, { tone: 'success' });
+          return;
+        }
+        button.disabled = true;
+        try {
+          await wearOutfit(outfit);
+          ui.toast(`Wearing ${name}, reload the editor to see it`, { tone: 'success' });
+        } catch {
+          ui.toast('Could not wear that outfit', { tone: 'danger' });
+        }
+        button.disabled = false;
+      } });
+      avatarToolbar().append(button);
+      Rk.onSettings(() => button.classList.toggle('rk-hidden', !Rk.isEnabled(ctx.id)));
     }
   });
 })();

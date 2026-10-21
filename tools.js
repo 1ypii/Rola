@@ -913,6 +913,8 @@
     ['game pass', 'Game pass', id => `/game-pass/${id}`, 'star']
   ];
 
+  const tradingTool = name => document.dispatchEvent(new CustomEvent('rk:trading-tool', { detail: name }));
+
   const searchTools = [
     ['tools.dataManager', 'Manage local data', 'server', openDataManager, 'export import backup storage'],
     ['tools.notesManager', 'Open notes', 'note', openNotesManager, 'notes saved'],
@@ -923,6 +925,10 @@
     ['tools.unfriendAlerts', 'Unfriends', 'users', openUnfriends, 'removed friends unfriended'],
     ['tools.itemDrops', 'Item drops', 'bell', openDrops, 'new roblox items catalog released'],
     ['tools.terminationWatch', 'Termination watchlist', 'eye', openTerminations, 'banned terminated deleted accounts watch'],
+    ['trading.resaleAlerts', 'Price alerts', 'bell', () => tradingTool('alerts'), 'resale limited price drop alert'],
+    ['trading.profitTracker', 'Profit tracker', 'chart', () => tradingTool('profit'), 'limiteds paid profit loss'],
+    ['trading.tradeAdMaker', 'Trade ad maker', 'swap', () => tradingTool('ads'), 'trade ad rolimons discord'],
+    ['trading.valueGraph', 'Value graph', 'chart', () => tradingTool('graph'), 'inventory value rap history graph'],
     ['tools.quickNotes', 'Quick notes', 'edit', toggleQuickNotes, 'notepad scratch'],
     ['tools.shortcutHelp', 'Keyboard shortcuts', 'keyboard', openShortcuts, 'hotkeys keys help']
   ];

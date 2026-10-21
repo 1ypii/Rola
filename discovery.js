@@ -1,7 +1,7 @@
 (() => {
   const { el, ui, fmt, icon } = Rk;
 
-  const homeIds = ['discovery.pinnedRow', 'discovery.recentRow', 'discovery.updatesRow', 'discovery.friendsPlayingRow', 'discovery.recentProfilesRow', 'discovery.recentItemsRow', 'discovery.shortcuts', 'discovery.greeting', 'discovery.randomGame'];
+  const homeIds = ['discovery.friendActivity', 'discovery.pinnedRow', 'discovery.recentRow', 'discovery.updatesRow', 'discovery.friendsPlayingRow', 'discovery.recentProfilesRow', 'discovery.recentItemsRow', 'discovery.shortcuts', 'discovery.greeting', 'discovery.randomGame'];
   const searchIds = ['discovery.searchPresence', 'discovery.searchFriendTag', 'discovery.searchJoinDate', 'discovery.idJump', 'discovery.exactMatch', 'discovery.searchHistory'];
   const cardSelector = '.game-card-container';
   const pageRoots = '#content, #container-main, #HomeContainer, .home-container, main, body';
@@ -1285,6 +1285,102 @@
       hideName();
       Rk.onSettings(hideName);
       markUser(line, me.id, 16);
+    }
+  });
+
+  Rk.feature({
+    id: 'discovery.friendActivity',
+    category: 'discovery',
+    name: 'Friend activity',
+    description: 'Shows a timeline of what your friends played today on home. It only records what it sees while you have Roblox open in a tab.',
+    default: false,
+    css: ctx => `${homeStyles(ctx)}
+.rk-activity-list { display: flex; flex-direction: column; }
+.rk-activity-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-top: 1px solid var(--rk-border); font-size: 14px; color: var(--rk-text); }
+.rk-activity-row:first-child { border-top: 0; }
+.rk-activity-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rk-activity-text a { font-weight: 600; color: var(--rk-text-strong) !important; }
+.rk-activity-time { flex: none; font-size: 12px; color: var(--rk-muted); }
+.rk-activity-empty { padding: 4px 0; font-size: 13px; color: var(--rk-muted); }
+`,
+    async run(ctx) {
+      const me = await Rk.me();
+      if (!me) return;
+      const DAY = 86400000;
+      const read = () => {
+        const saved = Rk.store.get('friends.activity', null);
+        return saved && typeof saved === 'object' && Array.isArray(saved.events) && saved.last && typeof saved.last === 'object' ? saved : { events: [], last: {} };
+      };
+      const describe = (event, link) => {
+        const game = event.placeId ? el('a', { href: `/games/${event.placeId}` }, event.game || 'a game') : event.game || 'a game';
+        if (event.type === 2) return [link, ' started playing ', game];
+        if (event.type === 3) return [link, ' opened Studio'];
+        if (event.type === 1) return [link, event.from === 2 ? ' left their game' : ' came online'];
+        return [link, ' went offline'];
+      };
+      let section = null;
+      const list = el('div', { class: 'rk-activity-list' });
+      const render = async () => {
+        if (Rk.page().type !== 'home') return;
+        if (!section) {
+          section = ui.section('Friend activity', list, { className: 'rk-activity' });
+          placeIn(homeRows(), section, 8);
+        }
+        const now = Date.now();
+        const events = read().events.filter(event => event && now - event.at < DAY).slice(-20).reverse();
+        if (!events.length) {
+          list.replaceChildren(el('div', { class: 'rk-activity-empty' }, 'Nothing yet today. What your friends play shows up here while you have Roblox open.'));
+          return;
+        }
+        const users = await Rk.api.users(events.map(event => event.id)).catch(() => new Map());
+        list.replaceChildren(...events.map(event => {
+          const user = users.get(event.id) || {};
+          const name = String(user.displayName || user.name || `User ${event.id}`);
+          const link = el('a', { href: `/users/${event.id}/profile` }, name);
+          return el('div', { class: 'rk-activity-row' },
+            ui.thumb(Rk.thumb('AvatarHeadShot', event.id, '150x150'), { size: 32, round: true }),
+            el('span', { class: 'rk-activity-text' }, describe(event, link)),
+            el('span', { class: 'rk-activity-time' }, fmt.ago(event.at))
+          );
+        }));
+      };
+      const poll = async () => {
+        if (!Rk.isEnabled(ctx.id) || document.visibilityState !== 'visible') return;
+        const ids = await friendIds();
+        if (!ids.length) return;
+        const presence = await Rk.api.presence(ids).catch(() => null);
+        if (!presence) return;
+        const saved = read();
+        const now = Date.now();
+        const baseline = !Object.keys(saved.last).length;
+        const last = {};
+        const events = saved.events.filter(event => event && now - event.at < DAY);
+        for (const id of ids) {
+          const entry = presence.get(id);
+          const type = entry ? Number(entry.userPresenceType) || 0 : 0;
+          const placeId = type === 2 && entry ? Number(entry.rootPlaceId || entry.placeId) || null : null;
+          const state = `${type}:${placeId || ''}`;
+          const before = saved.last[id];
+          if (!baseline && before && before.s !== state) {
+            events.push({ id, at: now, type, from: Number(before.t) || 0, placeId, game: type === 2 && entry && typeof entry.lastLocation === 'string' ? clip(entry.lastLocation, 80) : '' });
+          }
+          last[id] = { s: state, t: type };
+        }
+        Rk.store.set('friends.activity', { events: events.slice(-200), last });
+        render();
+      };
+      let timer = 0;
+      const schedule = () => {
+        clearInterval(timer);
+        timer = document.visibilityState === 'visible' && Rk.isEnabled(ctx.id) ? setInterval(poll, 60000) : 0;
+      };
+      document.addEventListener('visibilitychange', () => {
+        schedule();
+        poll();
+      });
+      schedule();
+      render();
+      poll();
     }
   });
 

@@ -2782,6 +2782,260 @@
   });
 
   Rk.feature({
+    id: 'site.friendsSidebar',
+    category: 'site',
+    name: 'Friends sidebar',
+    description: 'Adds a slim panel on the right edge of every page with your online friends, what they are playing and a Join button.',
+    default: false,
+    css: `
+      .rk-fside {
+        position: fixed;
+        top: 72px;
+        right: 0;
+        bottom: 88px;
+        z-index: 2147480000;
+        display: flex;
+        align-items: flex-start;
+        font-family: var(--rk-font);
+        pointer-events: none;
+      }
+      .rk-fside-toggle {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        margin-top: 8px;
+        padding: 10px 6px;
+        border: 1px solid var(--rk-border);
+        border-right: 0;
+        border-radius: var(--rk-radius) 0 0 var(--rk-radius);
+        background: var(--rk-bg);
+        color: var(--rk-text-strong);
+        font-size: 12px;
+        font-weight: 700;
+        box-shadow: var(--rk-shadow);
+        cursor: pointer;
+        pointer-events: auto;
+        transition: background-color var(--rk-fast) ease;
+      }
+      .rk-fside-toggle:hover {
+        background: var(--rk-surface);
+      }
+      .rk-fside-body {
+        display: flex;
+        flex-direction: column;
+        width: 0;
+        height: 100%;
+        overflow: hidden;
+        border: 1px solid transparent;
+        border-right: 0;
+        border-radius: var(--rk-radius-l) 0 0 var(--rk-radius-l);
+        background: var(--rk-bg);
+        box-shadow: var(--rk-shadow);
+        opacity: 0;
+        pointer-events: auto;
+        transition: width var(--rk-med) var(--rk-ease), opacity var(--rk-med) ease;
+      }
+      .rk-fside-open .rk-fside-body {
+        width: 260px;
+        border-color: var(--rk-border);
+        opacity: 1;
+      }
+      .rk-fside-head {
+        flex: none;
+        padding: 12px 14px 8px;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--rk-text-strong);
+        white-space: nowrap;
+      }
+      .rk-fside-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 0 6px 8px;
+        scrollbar-width: thin;
+      }
+      .rk-fside-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 248px;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        border-radius: var(--rk-radius);
+        transition: background-color var(--rk-fast) ease;
+      }
+      .rk-fside-row:hover {
+        background: var(--rk-hover);
+      }
+      .rk-fside-face {
+        position: relative;
+        flex: none;
+        display: inline-flex;
+      }
+      .rk-fside-dot {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: 10px;
+        height: 10px;
+        box-sizing: border-box;
+        border: 2px solid var(--rk-bg);
+        border-radius: 50%;
+      }
+      .rk-fside-dot[data-state="online"] { background: #00a2ff; }
+      .rk-fside-dot[data-state="game"] { background: #02b757; }
+      .rk-fside-dot[data-state="studio"] { background: #f68802; }
+      .rk-fside-text {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+      }
+      .rk-fside-name {
+        overflow: hidden;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--rk-text-strong) !important;
+        text-decoration: none !important;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .rk-fside-status {
+        overflow: hidden;
+        font-size: 12px;
+        color: var(--rk-muted);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .rk-fside-status[data-state="game"] { color: #02b757; }
+      .rk-fside-status[data-state="studio"] { color: #f68802; }
+      .rk-fside-empty {
+        padding: 8px 10px;
+        font-size: 13px;
+        color: var(--rk-muted);
+        white-space: nowrap;
+      }
+      @media (max-width: 760px) {
+        .rk-fside {
+          display: none;
+        }
+      }
+    `,
+    async run(ctx) {
+      const me = await Rk.me();
+      if (!me) return;
+      const states = ['offline', 'online', 'game', 'studio'];
+      const list = el('div', { class: 'rk-fside-list' }, el('div', { class: 'rk-fside-empty' }, ui.spinner(16)));
+      const count = el('span');
+      const toggle = el('button', { type: 'button', class: 'rk-fside-toggle', 'aria-label': 'Show online friends', title: 'Online friends' }, icon('users', 18), count);
+      const panel = el('aside', { class: 'rk-fside', 'aria-label': 'Online friends' }, toggle, el('div', { class: 'rk-fside-body' }, el('div', { class: 'rk-fside-head' }, 'Friends online'), list));
+      const setOpen = open => {
+        panel.classList.toggle('rk-fside-open', open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+      setOpen(Rk.store.get('friends.sidebarOpen', false) === true);
+      toggle.addEventListener('click', () => {
+        const open = !panel.classList.contains('rk-fside-open');
+        setOpen(open);
+        Rk.store.set('friends.sidebarOpen', open);
+      });
+      Rk.domReady.then(() => document.body.append(panel));
+
+      const loadFriends = async () => {
+        const ids = [];
+        let cursor = '';
+        for (let page = 0; page < 20; page += 1) {
+          const json = await Rk.api.get(`https://friends.roblox.com/v1/users/${me.id}/friends/find?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`).catch(() => null);
+          const items = json && (Array.isArray(json.PageItems) ? json.PageItems : Array.isArray(json.data) ? json.data : null);
+          if (!items) break;
+          for (const item of items) {
+            const id = Number(item && item.id);
+            if (Rk.isId(id)) ids.push(id);
+          }
+          cursor = json.NextCursor || json.nextPageCursor || '';
+          if (!cursor) break;
+        }
+        if (!ids.length) {
+          const json = await Rk.api.get(`https://friends.roblox.com/v1/users/${me.id}/friends`).catch(() => null);
+          for (const item of json && Array.isArray(json.data) ? json.data : []) {
+            const id = Number(item && item.id);
+            if (Rk.isId(id)) ids.push(id);
+          }
+        }
+        return [...new Set(ids)];
+      };
+      const friends = loadFriends();
+
+      const join = (id, entry) => {
+        const placeId = Number(entry.rootPlaceId || entry.placeId);
+        if (typeof entry.gameId === 'string' && entry.gameId && Rk.isId(placeId)) Rk.launch.server(placeId, entry.gameId);
+        else Rk.launch.follow(id);
+      };
+
+      const refresh = async () => {
+        if (!Rk.isEnabled(ctx.id) || document.visibilityState !== 'visible') return;
+        const ids = await friends;
+        const presence = ids.length ? await Rk.api.presence(ids).catch(() => null) : new Map();
+        if (!presence) return;
+        const order = { game: 0, studio: 1, online: 2 };
+        const online = ids
+          .map(id => ({ id, entry: presence.get(id) }))
+          .filter(item => item.entry && Number(item.entry.userPresenceType) > 0)
+          .map(item => ({ ...item, state: states[Number(item.entry.userPresenceType)] || 'online' }));
+        const users = online.length ? await Rk.api.users(online.map(item => item.id)).catch(() => new Map()) : new Map();
+        online.sort((a, b) => order[a.state] - order[b.state] || String((users.get(a.id) || {}).displayName || '').localeCompare(String((users.get(b.id) || {}).displayName || '')));
+        count.textContent = String(online.length);
+        if (!online.length) {
+          list.replaceChildren(el('div', { class: 'rk-fside-empty' }, 'No friends online right now'));
+          return;
+        }
+        list.replaceChildren(...online.map(({ id, entry, state }) => {
+          const user = users.get(id) || {};
+          const name = String(user.displayName || user.name || `User ${id}`);
+          const where = typeof entry.lastLocation === 'string' && entry.lastLocation ? entry.lastLocation : '';
+          const status = { online: 'Online', game: where || 'In game', studio: where ? `Studio: ${where}` : 'In Studio' }[state];
+          const canJoin = state === 'game' && Rk.isId(Number(entry.rootPlaceId || entry.placeId));
+          return el('div', { class: 'rk-fside-row' },
+            el('a', { class: 'rk-fside-face', href: `/users/${id}/profile` },
+              ui.thumb(Rk.thumb('AvatarHeadShot', id, '150x150'), { size: 36, round: true }),
+              el('span', { class: 'rk-fside-dot', dataset: { state } })
+            ),
+            el('div', { class: 'rk-fside-text' },
+              el('a', { class: 'rk-fside-name', href: `/users/${id}/profile`, title: user.name ? `@${user.name}` : name }, name),
+              el('span', { class: 'rk-fside-status', dataset: { state }, title: status }, status)
+            ),
+            canJoin ? ui.button('Join', { variant: 'primary', onClick: () => join(id, entry) }) : null
+          );
+        }));
+      };
+
+      let timer = 0;
+      const schedule = () => {
+        clearInterval(timer);
+        timer = document.visibilityState === 'visible' && Rk.isEnabled(ctx.id) ? setInterval(refresh, 60000) : 0;
+      };
+      document.addEventListener('visibilitychange', () => {
+        schedule();
+        refresh();
+      });
+      let wasOn = true;
+      Rk.onSettings(() => {
+        const on = Rk.isEnabled(ctx.id);
+        panel.classList.toggle('rk-hidden', !on);
+        if (on === wasOn) return;
+        wasOn = on;
+        schedule();
+        if (on) refresh();
+      });
+      schedule();
+      refresh();
+    }
+  });
+
+  Rk.feature({
     id: 'site.fontSmoothing',
     category: 'site',
     name: 'Font smoothing',

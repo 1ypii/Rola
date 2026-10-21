@@ -2080,4 +2080,433 @@
       });
     }
   });
+
+  const toolsCss = `
+    .rk-trading-tools { margin-bottom: 12px; }
+    .rk-trading-alert-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .rk-trading-alert-form .rk-input { width: 160px; }
+    .rk-trading-tool-name { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+    .rk-trading-tool-name .rk-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+    .rk-trading-tool-scroll { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
+    .rk-trading-ad { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .rk-trading-ad-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .rk-trading-ad-list { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
+    .rk-trading-ad-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border: 0; border-radius: var(--rk-radius); background: transparent; color: var(--rk-text); font-family: var(--rk-font); font-size: 13px; text-align: left; cursor: pointer; transition: background-color var(--rk-fast) ease; }
+    .rk-trading-ad-item:hover { background: var(--rk-hover); }
+    .rk-trading-ad-item[aria-pressed="true"] { background: var(--rk-accent-soft); color: var(--rk-text-strong); }
+    .rk-trading-ad-item > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rk-trading-ad-picked { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
+    .rk-trading-ad-output { width: 100%; min-height: 110px; padding: 10px 12px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .rk-trading-ad-saved { display: flex; flex-direction: column; gap: 4px; }
+    @media (max-width: 640px) { .rk-trading-ad { grid-template-columns: 1fr; } }
+  `;
+
+  let toolBarReady = null;
+  const toolBar = () => {
+    if (!toolBarReady) {
+      toolBarReady = slot(0).then(node => {
+        const bar = el('div', { class: 'rk-trading-toolbar rk-trading-tools' });
+        node.append(bar);
+        return bar;
+      });
+    }
+    return toolBarReady;
+  };
+
+  const addToolButton = async (key, label, iconName, onOpen) => {
+    document.addEventListener('rk:trading-tool', event => {
+      if (event.detail === key) onOpen();
+    });
+    const page = Rk.page();
+    const me = await Rk.me();
+    if (!me || !(page.type === 'trades' || (page.type === 'inventory' && page.id === me.id))) return;
+    (await toolBar()).append(ui.button(label, { variant: 'secondary', icon: iconName, onClick: onOpen }));
+  };
+
+  const itemName = (row, values) => {
+    const entry = values.get(row.assetId);
+    return row.name && row.name !== 'Unknown item' ? row.name : entry && entry.name ? entry.name : `Item ${row.assetId}`;
+  };
+
+  const readAlerts = () => {
+    const saved = Rk.store.get('trading.priceAlerts', []);
+    return (Array.isArray(saved) ? saved : []).filter(alert => alert && Rk.isId(alert.id) && Number.isFinite(alert.target) && alert.target > 0).slice(0, 30);
+  };
+
+  const openAlerts = () => {
+    const body = el('div', { class: 'rk-stack rk-trading-tool-scroll' }, ui.spinner(18));
+    ui.modal({ title: 'Price alerts', width: 560, content: body });
+    const render = async () => {
+      const alerts = readAlerts();
+      if (!alerts.length) {
+        body.replaceChildren(ui.empty('No price alerts yet. Open a limited and set a target price.'));
+        return;
+      }
+      const lows = (await Rk.bg('price-lows').catch(() => null)) || {};
+      body.replaceChildren(...alerts.map(alert => ui.row(
+        el('span', { class: 'rk-trading-tool-name' }, ui.thumb(Rk.thumb('Asset', alert.id, '150x150'), { size: 36 }), ui.link(`/catalog/${alert.id}`, alert.name || `Item ${alert.id}`)),
+        [
+          el('span', { class: 'rk-muted' }, 'Lowest'),
+          money(lows[alert.id]),
+          el('span', { class: 'rk-muted' }, 'Target'),
+          ui.robux(alert.target),
+          ui.button('', { variant: 'ghost', icon: 'trash', title: 'Remove alert', onClick: () => {
+            Rk.store.set('trading.priceAlerts', readAlerts().filter(item => item.id !== alert.id));
+            render();
+          } })
+        ]
+      )));
+    };
+    render();
+  };
+
+  Rk.feature({
+    id: 'trading.resaleAlerts',
+    category: 'trading',
+    name: 'Resale price alerts',
+    description: 'Set a target price on a limited and get a notification when someone lists it at or below that price, even with the tab closed.',
+    default: false,
+    css: toolsCss,
+    run() {
+      addToolButton('alerts', 'Price alerts', 'bell', openAlerts);
+      if (Rk.page().type !== 'item') return;
+      itemSection(9, 'Price alert', async id => {
+        const details = await Rk.api.get(`https://economy.roblox.com/v2/assets/${id}/details`, { cache: 600000 }).catch(() => null);
+        const collectible = details && typeof details.CollectibleItemId === 'string' && /^[0-9a-f-]{36}$/i.test(details.CollectibleItemId) ? details.CollectibleItemId : null;
+        if (!collectible) return null;
+        const name = (details && typeof details.Name === 'string' && details.Name.slice(0, 100)) || `Item ${id}`;
+        const field = ui.input({ type: 'number', placeholder: 'Target price', maxLength: 12, onEnter: () => save() });
+        field.min = '1';
+        const status = el('span', { class: 'rk-muted' });
+        const remove = ui.button('Remove', { variant: 'ghost', onClick: () => {
+          Rk.store.set('trading.priceAlerts', readAlerts().filter(alert => alert.id !== id));
+          field.value = '';
+          sync();
+        } });
+        const sync = () => {
+          const alert = readAlerts().find(item => item.id === id);
+          status.textContent = alert ? `Alerting at ${fmt.num(alert.target)} or less` : 'No alert set';
+          remove.classList.toggle('rk-hidden', !alert);
+          if (alert && !field.value) field.value = String(alert.target);
+        };
+        const save = () => {
+          const target = Math.floor(Number(field.value));
+          if (!Number.isFinite(target) || target <= 0) {
+            ui.toast('Enter a price above 0', { tone: 'warning' });
+            return;
+          }
+          const list = readAlerts().filter(alert => alert.id !== id);
+          if (list.length >= 30) {
+            ui.toast('You can keep up to 30 price alerts', { tone: 'warning' });
+            return;
+          }
+          list.push({ id, name, target, collectible });
+          Rk.store.set('trading.priceAlerts', list);
+          Rk.bg('poll-now').catch(() => {});
+          ui.toast(`You will get a notification when it is listed for ${fmt.num(target)} or less`, { tone: 'success' });
+          sync();
+        };
+        sync();
+        return el('div', { class: 'rk-trading-alert-form' },
+          field,
+          ui.button('Alert me', { variant: 'primary', icon: 'bell', onClick: save }),
+          remove,
+          status,
+          ui.button('All alerts', { variant: 'ghost', onClick: openAlerts })
+        );
+      });
+    }
+  });
+
+  const openProfit = async () => {
+    const body = el('div', { class: 'rk-stack' }, ui.spinner(18));
+    ui.modal({ title: 'Profit tracker', width: 760, content: body });
+    const me = await Rk.me();
+    if (!me) {
+      body.replaceChildren(ui.empty('Sign in to see your profit'));
+      return;
+    }
+    const [items, values, rows] = await Promise.all([
+      collectibles(me.id),
+      valuesMap(),
+      Rk.api.paged(`https://economy.roblox.com/v2/users/${me.id}/transactions?transactionType=Purchase`, { max: 1000, limit: 100 }).catch(() => [])
+    ]);
+    if (!items.length) {
+      body.replaceChildren(ui.empty('You have no limiteds'));
+      return;
+    }
+    const paid = new Map();
+    for (const row of [...rows].reverse()) {
+      const details = row && row.details;
+      if (!details || details.type !== 'Asset' || !Rk.isId(details.id)) continue;
+      const amount = Math.abs(num(row.currency && row.currency.amount) || 0);
+      if (!paid.has(Number(details.id))) paid.set(Number(details.id), []);
+      paid.get(Number(details.id)).push(amount);
+    }
+    const list = ranked(items, values).map(item => {
+      const prices = paid.get(item.assetId);
+      const cost = prices && prices.length ? prices.shift() : null;
+      return { ...item, cost, profit: cost === null ? null : item.value - cost };
+    });
+    const known = list.filter(item => item.cost !== null);
+    const spent = sum(known, item => item.cost);
+    const worthNow = sum(known, item => item.value);
+    const profit = worthNow - spent;
+    body.replaceChildren(
+      ui.stats([
+        ['Limiteds', fmt.num(list.length)],
+        ['Bought with Robux', fmt.num(known.length)],
+        ['You paid', ui.robux(spent)],
+        ['Worth now', ui.robux(worthNow)],
+        ['Profit', ui.pill(`${signed(profit)}${spent ? ` (${percentText((profit / spent) * 100)})` : ''}`, toneOf(profit))]
+      ]),
+      el('div', { class: 'rk-trading-note' }, `Based on your last ${fmt.num(rows.length)} purchases. Items you got from trades have no purchase price, so they show as unknown.`),
+      el('div', { class: 'rk-trading-tool-scroll' }, ui.table(
+        [{ label: 'Item' }, { label: 'Paid', align: 'right' }, { label: 'Value', align: 'right' }, { label: 'RAP', align: 'right' }, { label: 'Profit', align: 'right' }],
+        list.map(item => [
+          el('span', { class: 'rk-trading-tool-name' }, ui.thumb(Rk.thumb('Asset', item.assetId, '150x150'), { size: 32 }), ui.link(`/catalog/${item.assetId}`, itemName(item, values)), item.serial ? serialPill(item.serial) : null),
+          item.cost === null ? el('span', { class: 'rk-muted' }, 'Unknown') : ui.robux(item.cost),
+          ui.robux(item.value),
+          ui.robux(item.rap),
+          item.profit === null ? el('span', { class: 'rk-muted' }, '-') : ui.pill(signed(item.profit), toneOf(item.profit))
+        ])
+      ))
+    );
+  };
+
+  Rk.feature({
+    id: 'trading.profitTracker',
+    category: 'trading',
+    name: 'Profit tracker',
+    description: 'Compares what you paid for each of your limiteds with what it is worth now, item by item and in total.',
+    default: false,
+    css: toolsCss,
+    run() {
+      addToolButton('profit', 'Profit tracker', 'chart', openProfit);
+    }
+  });
+
+  const AD_TAGS = ['Any', 'Upgrade', 'Downgrade', 'Demand', 'Rares', 'Robux', 'Adds'];
+
+  const readAds = () => {
+    const saved = Rk.store.get('trading.tradeAds', []);
+    return (Array.isArray(saved) ? saved : []).filter(ad => ad && Array.isArray(ad.offer) && Array.isArray(ad.request) && Array.isArray(ad.tags)).slice(0, 5);
+  };
+
+  const adText = (ad, values, me) => {
+    const entry = id => values.get(id) || { name: `Item ${id}`, value: 0, rap: 0 };
+    const short = value => fmt.compact(value);
+    const offer = ad.offer.map(entry);
+    const request = ad.request.map(entry);
+    const robux = Math.max(0, Number(ad.robux) || 0);
+    const give = sum(offer, item => item.value || item.rap) + robux;
+    const get = sum(request, item => item.value || item.rap);
+    const offerNames = [...offer.map(item => (ad.style === 'short' && item.acronym ? item.acronym : `${item.name} (${short(item.value || item.rap)})`)), robux ? `${fmt.num(robux)} Robux` : null].filter(Boolean);
+    const requestNames = [...request.map(item => (ad.style === 'short' && item.acronym ? item.acronym : `${item.name} (${short(item.value || item.rap)})`)), ...ad.tags.map(tag => tag.toLowerCase())];
+    const link = me ? `roblox.com/users/${me.id}/trade` : '';
+    if (ad.style === 'short') return `${offerNames.join(' + ') || 'nothing'} for ${requestNames.join(' + ') || 'offers'}${link ? ` | ${link}` : ''}`;
+    if (ad.style === 'detailed') {
+      const lines = list => list.map(item => `- ${item.name} | value ${fmt.num(item.value || item.rap)} | RAP ${fmt.num(item.rap)}${item.demand ? ` | ${item.demand.toLowerCase()} demand` : ''}`);
+      return [
+        'OFFERING',
+        ...lines(offer),
+        robux ? `- ${fmt.num(robux)} Robux` : null,
+        `Total value ${fmt.num(give)}`,
+        '',
+        'LOOKING FOR',
+        ...lines(request),
+        ...ad.tags.map(tag => `- ${tag.toLowerCase()}`),
+        request.length ? `Total value ${fmt.num(get)}` : null,
+        '',
+        link ? `Send a trade: ${link}` : null
+      ].filter(line => line !== null).join('\n');
+    }
+    return [
+      `[OFFERING] ${offerNames.join(' + ') || 'nothing yet'}  =  ${short(give)} value`,
+      `[WANT] ${requestNames.join(' + ') || 'offers'}${request.length ? `  =  ${short(get)} value` : ''}`,
+      link ? `DM me or send a trade: ${link}` : null
+    ].filter(Boolean).join('\n');
+  };
+
+  const openAdMaker = async () => {
+    const body = el('div', { class: 'rk-stack' }, ui.spinner(18));
+    ui.modal({ title: 'Trade ad maker', width: 860, content: body });
+    const me = await Rk.me();
+    const [items, values] = await Promise.all([me ? collectibles(me.id) : [], valuesMap()]);
+    const mine = ranked(items, values);
+    const ad = { offer: [], robux: 0, request: [], tags: [], style: 'discord' };
+    const offerList = el('div', { class: 'rk-trading-ad-list' });
+    const requestList = el('div', { class: 'rk-trading-ad-list' });
+    const offerPicked = el('div', { class: 'rk-trading-ad-picked' });
+    const requestPicked = el('div', { class: 'rk-trading-ad-picked' });
+    const balance = el('div', { class: 'rk-trading-note' });
+    const output = el('textarea', { class: 'rk-input rk-trading-ad-output', readonly: true });
+    const savedList = el('div', { class: 'rk-trading-ad-saved' });
+    const worthOf = id => {
+      const entry = values.get(id);
+      return entry ? entry.value || entry.rap : 0;
+    };
+    const update = () => {
+      offerPicked.replaceChildren(...ad.offer.map(id => ui.pill((values.get(id) || {}).name || `Item ${id}`, 'accent')));
+      requestPicked.replaceChildren(...ad.request.map(id => ui.pill((values.get(id) || {}).name || `Item ${id}`, 'accent')), ...ad.tags.map(tag => ui.pill(tag, 'neutral')));
+      const give = sum(ad.offer, worthOf) + ad.robux;
+      const get = sum(ad.request, worthOf);
+      balance.textContent = ad.request.length && give
+        ? `You give ${fmt.num(give)} value and ask for ${fmt.num(get)}, ${get >= give ? 'they overpay' : 'you overpay'} by ${percentText(Math.abs(((get - give) / give) * 100))}`
+        : `You give ${fmt.num(give)} value`;
+      output.value = adText(ad, values, me);
+      for (const button of offerList.children) button.setAttribute('aria-pressed', ad.offer.includes(Number(button.dataset.id)) ? 'true' : 'false');
+    };
+    const itemButton = (id, label, extra, onClick) => {
+      const button = el('button', { type: 'button', class: 'rk-trading-ad-item', dataset: { id: String(id) } }, ui.thumb(Rk.thumb('Asset', id, '150x150'), { size: 28 }), el('span', null, label), extra);
+      button.addEventListener('click', onClick);
+      return button;
+    };
+    const offerFilter = ui.input({ placeholder: 'Filter your items', maxLength: 60, onInput: value => {
+      const text = value.trim().toLowerCase();
+      for (const button of offerList.children) button.classList.toggle('rk-hidden', Boolean(text) && !button.textContent.toLowerCase().includes(text));
+    } });
+    offerList.replaceChildren(...(mine.length ? mine.map(item => itemButton(item.assetId, itemName(item, values), ui.robux(item.value, { compact: true }), () => {
+      if (ad.offer.includes(item.assetId)) ad.offer = ad.offer.filter(id => id !== item.assetId);
+      else if (ad.offer.length < 4) ad.offer = [...ad.offer, item.assetId];
+      else ui.toast('You can offer up to 4 items', { tone: 'warning' });
+      update();
+    })) : [ui.empty('You have no limiteds')]));
+    const robuxField = ui.input({ type: 'number', placeholder: 'Add Robux', maxLength: 12, onInput: value => {
+      ad.robux = Math.max(0, Math.floor(Number(value) || 0));
+      update();
+    } });
+    const catalog = [...values.values()].filter(entry => entry.name).sort((a, b) => (b.value || b.rap) - (a.value || a.rap));
+    const showMatches = text => {
+      const query = text.trim().toLowerCase();
+      const matches = query ? catalog.filter(entry => entry.name.toLowerCase().includes(query) || (entry.acronym && entry.acronym.toLowerCase() === query)).slice(0, 8) : [];
+      requestList.replaceChildren(...matches.map(entry => itemButton(entry.id, entry.name, ui.robux(entry.value || entry.rap, { compact: true }), () => {
+        if (ad.request.includes(entry.id)) ad.request = ad.request.filter(id => id !== entry.id);
+        else if (ad.request.length + ad.tags.length < 4) ad.request = [...ad.request, entry.id];
+        else ui.toast('You can ask for up to 4 items or tags', { tone: 'warning' });
+        update();
+      })));
+    };
+    const requestSearch = ui.input({ placeholder: 'Search limiteds you want', maxLength: 60, onInput: showMatches });
+    const tagButtons = AD_TAGS.map(tag => ui.button(tag, { variant: 'secondary', onClick: () => {
+      if (ad.tags.includes(tag)) ad.tags = ad.tags.filter(item => item !== tag);
+      else if (ad.request.length + ad.tags.length < 4) ad.tags = [...ad.tags, tag];
+      else ui.toast('You can ask for up to 4 items or tags', { tone: 'warning' });
+      update();
+    } }));
+    const styleSelect = ui.select([['discord', 'Discord'], ['short', 'Short'], ['detailed', 'Detailed']], ad.style, value => {
+      ad.style = value;
+      update();
+    });
+    const renderSaved = () => {
+      const ads = readAds();
+      savedList.replaceChildren(...(ads.length ? ads.map((saved, index) => ui.row(
+        el('span', { class: 'rk-muted' }, adText({ ...saved, style: 'short' }, values, null).slice(0, 90)),
+        [
+          ui.button('Copy', { variant: 'secondary', onClick: () => ui.copy(adText(saved, values, me), 'Trade ad copied with fresh values') }),
+          ui.button('Edit', { variant: 'ghost', onClick: () => {
+            Object.assign(ad, { offer: [...saved.offer], robux: saved.robux || 0, request: [...saved.request], tags: [...saved.tags], style: saved.style || 'discord' });
+            robuxField.value = ad.robux ? String(ad.robux) : '';
+            styleSelect.value = ad.style;
+            update();
+          } }),
+          ui.button('', { variant: 'ghost', icon: 'trash', title: 'Delete', onClick: () => {
+            Rk.store.set('trading.tradeAds', readAds().filter((item, position) => position !== index));
+            renderSaved();
+          } })
+        ]
+      )) : [el('div', { class: 'rk-muted' }, 'No saved ads yet')]));
+    };
+    body.replaceChildren(
+      el('div', { class: 'rk-trading-ad' },
+        el('div', { class: 'rk-trading-ad-side' }, el('div', { class: 'rk-strong' }, 'You offer (up to 4)'), offerFilter, offerList, robuxField, offerPicked),
+        el('div', { class: 'rk-trading-ad-side' }, el('div', { class: 'rk-strong' }, 'You want (up to 4)'), requestSearch, requestList, el('div', { class: 'rk-inline' }, tagButtons), requestPicked)
+      ),
+      balance,
+      el('div', { class: 'rk-inline' }, el('span', { class: 'rk-muted' }, 'Style'), styleSelect),
+      output,
+      el('div', { class: 'rk-inline' },
+        ui.button('Copy', { variant: 'primary', icon: 'copy', onClick: () => ui.copy(output.value, 'Trade ad copied') }),
+        ui.button('Save ad', { variant: 'secondary', onClick: () => {
+          if (!ad.offer.length && !ad.robux) {
+            ui.toast('Pick something to offer first', { tone: 'warning' });
+            return;
+          }
+          Rk.store.set('trading.tradeAds', [{ offer: [...ad.offer], robux: ad.robux, request: [...ad.request], tags: [...ad.tags], style: ad.style }, ...readAds()].slice(0, 5));
+          renderSaved();
+          ui.toast('Trade ad saved', { tone: 'success' });
+        } }),
+        ui.button('Open Rolimons', { variant: 'ghost', icon: 'external', href: 'https://www.rolimons.com/trades', target: '_blank' })
+      ),
+      el('div', { class: 'rk-strong' }, 'Saved ads'),
+      savedList
+    );
+    update();
+    renderSaved();
+  };
+
+  Rk.feature({
+    id: 'trading.tradeAdMaker',
+    category: 'trading',
+    name: 'Trade ad maker',
+    description: 'Pick what you offer and what you want, and get a ready to paste trade ad with values for Discord or Rolimons.',
+    default: false,
+    css: toolsCss,
+    run() {
+      addToolButton('ads', 'Trade ad maker', 'tag', openAdMaker);
+    }
+  });
+
+  const openValueGraph = async () => {
+    const body = el('div', { class: 'rk-stack' }, ui.spinner(18));
+    ui.modal({ title: 'Value graph', width: 720, content: body });
+    const saved = Rk.store.get('trading.valueSnapshots', []);
+    const list = (Array.isArray(saved) ? saved : []).filter(entry => Array.isArray(entry) && isDay(entry[0]) && Number.isFinite(entry[1]) && Number.isFinite(entry[2]));
+    if (list.length < 2) {
+      body.replaceChildren(ui.empty('Not enough history yet. Turn on Daily value snapshots and open your inventory on a few different days.'));
+      return;
+    }
+    let field = 1;
+    let days = 30;
+    const holder = el('div');
+    const draw = () => {
+      const since = days ? Date.now() - days * DAY : 0;
+      const points = list.map(entry => ({ time: Date.parse(`${entry[0]}T12:00:00Z`), value: entry[field] })).filter(point => point.time >= since);
+      if (points.length < 2) {
+        holder.replaceChildren(ui.empty('Not enough history in this range'));
+        return;
+      }
+      const change = points[points.length - 1].value - points[0].value;
+      holder.replaceChildren(
+        el('div', { class: 'rk-inline' }, ui.robux(points[points.length - 1].value), ui.pill(`${signed(change)} since ${fmt.date(points[0].time)}`, toneOf(change))),
+        chart(points, { label: field === 1 ? 'Inventory value over time' : 'Inventory RAP over time', valueText: value => fmt.compact(value), valueNode: value => ui.robux(value) })
+      );
+    };
+    body.replaceChildren(
+      el('div', { class: 'rk-inline' },
+        ui.select([['1', 'Value'], ['2', 'RAP']], '1', value => {
+          field = Number(value);
+          draw();
+        }),
+        ui.select([['7', 'Last 7 days'], ['30', 'Last 30 days'], ['0', 'All time']], '30', value => {
+          days = Number(value);
+          draw();
+        })
+      ),
+      holder
+    );
+    draw();
+  };
+
+  Rk.feature({
+    id: 'trading.valueGraph',
+    category: 'trading',
+    name: 'Value graph',
+    description: 'Charts your inventory value and RAP over time from your daily value snapshots.',
+    default: false,
+    css: toolsCss + chartCss,
+    run() {
+      addToolButton('graph', 'Value graph', 'chart', openValueGraph);
+    }
+  });
 })();

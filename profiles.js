@@ -1008,6 +1008,184 @@ textarea.rk-input.rk-profile-note { display: block; height: auto; min-height: 96
     }
   });
 
+  const compareFacts = userId => cached(`compare:${userId}`, async () => {
+    const [user, friends, followers, following, groups, premium, privacy, games, badges] = await Promise.all([
+      safe(Rk.api.get(`https://users.roblox.com/v1/users/${userId}`)),
+      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${userId}/friends/count`)),
+      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${userId}/followers/count`)),
+      safe(Rk.api.get(`https://friends.roblox.com/v1/users/${userId}/followings/count`)),
+      groupsOf(userId),
+      safe(Rk.api.get(`https://premiumfeatures.roblox.com/v1/users/${userId}/validate-membership`, { cache: 60000 })),
+      safe(Rk.api.get(`https://inventory.roblox.com/v1/users/${userId}/can-view-inventory`, { cache: 60000 })),
+      safe(Rk.api.paged(`https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&sortOrder=Desc`, { max: 100, limit: 50 })),
+      safe(Rk.api.get(`https://badges.roblox.com/v1/users/${userId}/badges?limit=100&sortOrder=Desc`))
+    ]);
+    if (!user || typeof user.name !== 'string') return null;
+    let value = null;
+    if (privacy && privacy.canView === true) {
+      const [items, values] = await Promise.all([
+        safe(Rk.api.paged(`https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?sortOrder=Asc`, { max: 2000, limit: 100 })),
+        safe(Rk.values())
+      ]);
+      if (Array.isArray(items)) {
+        value = 0;
+        for (const item of items) {
+          if (!item || !Rk.isId(item.assetId)) continue;
+          const entry = values instanceof Map ? values.get(Number(item.assetId)) : null;
+          value += entry && entry.value > 0 ? entry.value : Math.max(0, Number(item.recentAveragePrice) || 0);
+        }
+      }
+    }
+    const count = json => (json && Number.isSafeInteger(json.count) ? json.count : null);
+    const badgeList = badges && Array.isArray(badges.data) ? badges.data : null;
+    return {
+      id: Number(user.id),
+      name: user.name,
+      displayName: typeof user.displayName === 'string' && user.displayName ? user.displayName : user.name,
+      created: toTime(user.created),
+      verified: user.hasVerifiedBadge === true,
+      premium: premium === true || premium === 'true',
+      inventory: privacy && typeof privacy.canView === 'boolean' ? privacy.canView : null,
+      friends: count(friends),
+      followers: count(followers),
+      following: count(following),
+      groups: Array.isArray(groups) ? groups.length : null,
+      badges: badgeList ? badgeList.length : null,
+      moreBadges: Boolean(badges && badges.nextPageCursor),
+      visits: Array.isArray(games) ? games.reduce((sum, game) => sum + (game && Number(game.placeVisits) > 0 ? Number(game.placeVisits) : 0), 0) : null,
+      value
+    };
+  });
+
+  Rk.feature({
+    id: 'profiles.compareProfiles',
+    category: 'profiles',
+    name: 'Compare profiles',
+    description: 'Adds a Compare button to profiles that puts this user and another one side by side: age, friends, followers, badges, communities, value and more.',
+    default: false,
+    pages: PROFILE,
+    css: `${headerCss}
+.rk-compare-form { display: flex; gap: 8px; margin-bottom: 14px; }
+.rk-compare-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.rk-compare-table th, .rk-compare-table td { padding: 8px 6px; border-top: 1px solid var(--rk-border); text-align: center; color: var(--rk-text); }
+.rk-compare-table th:first-child, .rk-compare-table td:first-child { text-align: left; color: var(--rk-muted); font-weight: 600; }
+.rk-compare-table thead th { border-top: 0; color: var(--rk-text-strong); }
+.rk-compare-who { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; }
+.rk-compare-win { color: var(--rk-accent) !important; font-weight: 700; }
+`,
+    async run() {
+      const id = profileId();
+      if (!id) return;
+      const open = async () => {
+        const me = await Rk.me();
+        const field = ui.input({ placeholder: 'Username to compare with', maxLength: 20, value: me && me.id !== id ? me.name : '' });
+        const result = el('div');
+        const compare = async () => {
+          const text = field.value.trim();
+          if (!text) return;
+          result.replaceChildren(ui.spinner(20));
+          let otherId = /^\d{1,15}$/.test(text) ? Number(text) : null;
+          if (!otherId) {
+            const json = await safe(Rk.api.post('https://users.roblox.com/v1/usernames/users', { usernames: [text], excludeBannedUsers: false }));
+            otherId = json && Array.isArray(json.data) && json.data[0] ? Number(json.data[0].id) : null;
+          }
+          if (!Rk.isId(otherId)) {
+            result.replaceChildren(ui.empty('No user found with that name'));
+            return;
+          }
+          const [a, b] = await Promise.all([compareFacts(id), compareFacts(otherId)]);
+          if (!a || !b) {
+            result.replaceChildren(ui.empty('Could not load one of these profiles'));
+            return;
+          }
+          const yes = value => (value === null ? '?' : value ? 'Yes' : 'No');
+          const number = value => (value === null ? '?' : fmt.num(value));
+          const rows = [
+            ['Joined', side => (side.created ? new Date(side.created).toLocaleDateString() : '?'), side => (side.created ? -side.created : null)],
+            ['Account age', side => {
+              const age = side.created ? accountAge(side.created) : null;
+              return age ? `${age.years}y ${age.days}d` : '?';
+            }, side => (side.created ? -side.created : null)],
+            ['Friends', side => number(side.friends), side => side.friends],
+            ['Followers', side => number(side.followers), side => side.followers],
+            ['Following', side => number(side.following), side => side.following],
+            ['Badges', side => (side.badges === null ? '?' : `${fmt.num(side.badges)}${side.moreBadges ? '+' : ''}`), side => side.badges],
+            ['Communities', side => number(side.groups), side => side.groups],
+            ['Game visits', side => number(side.visits), side => side.visits],
+            ['Collectible value', side => (side.value === null ? (side.inventory === false ? 'Private' : '?') : fmt.num(side.value)), side => side.value],
+            ['Verified', side => yes(side.verified), side => (side.verified ? 1 : 0)],
+            ['Premium', side => yes(side.premium), side => (side.premium ? 1 : 0)],
+            ['Inventory', side => (side.inventory === null ? '?' : side.inventory ? 'Public' : 'Private'), null]
+          ];
+          const who = side => el('span', { class: 'rk-compare-who' },
+            ui.thumb(Rk.thumb('AvatarHeadShot', side.id, '150x150'), { size: 48, round: true }),
+            el('a', { href: `/users/${side.id}/profile` }, side.displayName),
+            el('span', { class: 'rk-muted' }, `@${side.name}`)
+          );
+          result.replaceChildren(el('table', { class: 'rk-compare-table' },
+            el('thead', null, el('tr', null, el('th', null, ''), el('th', null, who(a)), el('th', null, who(b)))),
+            el('tbody', null, rows.map(([label, show, score]) => {
+              const left = score ? score(a) : null;
+              const right = score ? score(b) : null;
+              const winner = typeof left === 'number' && typeof right === 'number' && left !== right ? (left > right ? 'a' : 'b') : null;
+              return el('tr', null,
+                el('td', null, label),
+                el('td', { class: winner === 'a' ? 'rk-compare-win' : null }, show(a)),
+                el('td', { class: winner === 'b' ? 'rk-compare-win' : null }, show(b))
+              );
+            }))
+          ));
+        };
+        field.addEventListener('keydown', event => {
+          if (event.key === 'Enter') compare();
+        });
+        ui.modal({
+          title: 'Compare profiles',
+          width: 560,
+          content: [el('div', { class: 'rk-compare-form' }, field, ui.button('Compare', { variant: 'primary', onClick: compare })), result]
+        });
+        if (field.value) compare();
+      };
+      addTool(ui.button('Compare', { icon: 'users', onClick: open }), 8);
+    }
+  });
+
+  Rk.feature({
+    id: 'profiles.mutualGames',
+    category: 'profiles',
+    name: 'Games you both played',
+    description: 'Shows games you and this user have both played on their profile. It is worked out from the badges you have both earned recently, so games without badges will not show.',
+    default: false,
+    pages: PROFILE,
+    css: tilesCss,
+    async run() {
+      const id = profileId();
+      const me = await Rk.me();
+      if (!id || !me || me.id === id) return;
+      const universesOf = async userId => {
+        const json = await safe(Rk.api.get(`https://badges.roblox.com/v1/users/${userId}/badges?limit=100&sortOrder=Desc`));
+        const found = new Set();
+        for (const badge of json && Array.isArray(json.data) ? json.data : []) {
+          const awarder = badge && badge.awarder;
+          if (awarder && Rk.isId(Number(awarder.id))) found.add(Number(awarder.id));
+        }
+        return found;
+      };
+      const [mine, theirs] = await Promise.all([universesOf(me.id), universesOf(id)]);
+      const shared = [...theirs].filter(universe => mine.has(universe)).slice(0, 12);
+      if (!shared.length) return;
+      const games = await safe(Rk.api.games(shared));
+      const tiles = shared.map(universe => {
+        const game = games && games.get(universe);
+        if (!game || !Rk.isId(Number(game.rootPlaceId))) return null;
+        const name = typeof game.name === 'string' && game.name ? game.name : 'Experience';
+        return tile(`/games/${game.rootPlaceId}`, ui.thumb(Rk.thumb('GameIcon', universe, '150x150'), { size: 84, alt: name }), name);
+      }).filter(Boolean);
+      if (!tiles.length) return;
+      addSection('profile', ui.section('Games you both played', el('div', { class: 'rk-profile-tiles' }, tiles), { className: 'rk-profile-mutual-games', actions: ui.pill(fmt.num(tiles.length)) }), 8);
+    }
+  });
+
   Rk.feature({
     id: 'profiles.exactCounts',
     category: 'profiles',

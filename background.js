@@ -9,7 +9,7 @@ const DROPS_KEY = 'rkbg:drops';
 const VALUES_URL = 'https://api.rolimons.com/items/v2/itemdetails';
 const VALUES_TTL = 10 * 60 * 1000;
 const POLL_ALARM = 'rk-poll';
-const ALERT_FEATURES = ['tools.friendOnlineAlerts', 'trading.tradeAlerts', 'trading.tradeBadge', 'tools.robuxAlerts', 'tools.unfriendAlerts', 'tools.watchFriend', 'tools.wishlistAlerts', 'tools.gameUpdateAlerts', 'tools.playtime', 'tools.itemDrops', 'tools.terminationWatch'];
+const ALERT_FEATURES = ['tools.friendOnlineAlerts', 'trading.tradeAlerts', 'trading.tradeBadge', 'tools.robuxAlerts', 'tools.unfriendAlerts', 'tools.watchFriend', 'tools.wishlistAlerts', 'tools.gameUpdateAlerts', 'tools.playtime', 'tools.itemDrops', 'tools.terminationWatch', 'trading.resaleAlerts'];
 const NOTIFY_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAABeUlEQVR42u3dgU3DQBBE0XhFR9APlAb9QE2hARRi5c6z8b1fQHyZf7NnK5F8uQAAVmWb9cGv79frmYL6+dq29gLOFvoRMjahZ2WU8LMbcBN8tg0l/GwbSvhZCSX8rIQSflZCCT8rocSUpez+bAtK+FkJRlDnEYSQAOPnuDGkAUYQAcZPcAxpgBFEAAggAAQQgAAvXRby/Xns9d4+NCAWfuqaLQUkg+ggoVYNv8saauXwO6zFXZBDmAAQ4EGsJaMeljod+BpAAAggAAQQAAIIAAEEEAACCAABBIAAAnAwrX8R6/xLlgYQAAIIwNMK6PL//PRaatUv3mUNtXIAHTZArToCuozANg9inc4Ed0EEgAACQAABIGA1AbPeFoS/s9UAI4iAu6qC8eNHA4wg1N7KYNz4+bcBJMwN3wh6hjNAC+bt/rsbQMKc8HeNIBLGh7/7DCBhfEY1+wLCv81DYXrbxuObslIXFv6ABqzaiJEbb9oOPpsMbQcAjOYX6ZKCsgWRhdEAAAAASUVORK5CYII=';
 
 let valuesMemory = null;
@@ -417,6 +417,36 @@ const pollWishlist = async (settings, data, state) => {
   state.wishPrices = next;
 };
 
+const pollPriceAlerts = async (data, state) => {
+  if (Date.now() - (state.priceAlertsAt || 0) < 110000) return;
+  state.priceAlertsAt = Date.now();
+  const alerts = (Array.isArray(data['trading.priceAlerts']) ? data['trading.priceAlerts'] : [])
+    .filter(alert => alert && Number.isSafeInteger(alert.id) && alert.id > 0 && Number.isFinite(alert.target) && alert.target > 0)
+    .slice(0, 30);
+  const hits = state.priceHits && typeof state.priceHits === 'object' ? state.priceHits : {};
+  const next = {};
+  const lows = {};
+  for (const alert of alerts) {
+    let collectible = typeof alert.collectible === 'string' && /^[0-9a-f-]{36}$/i.test(alert.collectible) ? alert.collectible : null;
+    if (!collectible) {
+      const details = await robloxRequest(`https://economy.roblox.com/v2/assets/${alert.id}/details`).catch(() => null);
+      collectible = details && typeof details.CollectibleItemId === 'string' && /^[0-9a-f-]{36}$/i.test(details.CollectibleItemId) ? details.CollectibleItemId : null;
+    }
+    if (!collectible) continue;
+    const json = await robloxRequest(`https://apis.roblox.com/marketplace-sales/v1/item/${collectible}/resellers?limit=1`).catch(() => null);
+    const listing = json && Array.isArray(json.data) ? json.data[0] : null;
+    const price = listing && Number.isFinite(Number(listing.price)) ? Number(listing.price) : null;
+    if (price === null) continue;
+    lows[alert.id] = price;
+    if (price > alert.target) continue;
+    const key = `${alert.id}:${alert.target}`;
+    next[key] = true;
+    if (!hits[key]) notify(cleanText(alert.name, 80) || 'Price alert', `Listed for ${price.toLocaleString()} Robux, your target was ${alert.target.toLocaleString()}`, `https://www.roblox.com/catalog/${alert.id}`);
+  }
+  state.priceHits = next;
+  await chrome.storage.local.set({ 'rkbg:priceLows': lows });
+};
+
 const pollGameUpdates = async (data, state) => {
   if (Date.now() - (state.gamesAt || 0) < 10 * 60 * 1000) return;
   state.gamesAt = Date.now();
@@ -554,6 +584,8 @@ const poll = async () => {
   else delete state.dropsSeen;
   if (isOn(settings, 'tools.terminationWatch')) jobs.push(pollTerms(settings, data, state));
   else delete state.termsAt;
+  if (isOn(settings, 'trading.resaleAlerts')) jobs.push(pollPriceAlerts(data, state));
+  else delete state.priceHits;
   await Promise.allSettled(jobs);
   await chrome.storage.local.set({ [STATE_KEY]: state });
 };
@@ -869,6 +901,19 @@ const saveFlag = async ({ userId, reason, note, remove } = {}) => {
   return list;
 };
 
+let adminCache = null;
+
+const adminAccounts = async () => {
+  if (adminCache && Date.now() - adminCache.at < 600000) return adminCache.list;
+  const json = await fetch('https://raw.githubusercontent.com/1ypii/Rola/main/admins.json', { credentials: 'omit', cache: 'no-cache' }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+  const list = (json && Array.isArray(json.admins) ? json.admins : [])
+    .filter(entry => entry && typeof entry.username === 'string' && /^[0-9a-f]{32}$/.test(entry.salt) && /^[0-9a-f]{64}$/.test(entry.hash))
+    .map(entry => ({ username: entry.username.trim().slice(0, 40), salt: entry.salt, hash: entry.hash }))
+    .slice(0, 50);
+  adminCache = { at: Date.now(), list };
+  return list;
+};
+
 const currentUserId = async () => {
   const me = await robloxRequest('https://users.roblox.com/v1/users/authenticated').catch(() => null);
   return me && Number.isSafeInteger(me.id) ? me.id : null;
@@ -886,6 +931,7 @@ const handlers = {
   regions: () => regionList(),
   'rola-badges': () => rolaBadges(),
   flagged: () => flaggedUsers(),
+  admins: () => adminAccounts(),
   'save-flag': payload => saveFlag(payload || {}),
   'save-badges': payload => saveBadges(payload || {}),
   'server-region': payload => serverRegion(payload || {}),
@@ -910,6 +956,10 @@ const handlers = {
   drops: async () => {
     const log = (await chrome.storage.local.get(DROPS_KEY))[DROPS_KEY];
     return Array.isArray(log) ? log : [];
+  },
+  'price-lows': async () => {
+    const lows = (await chrome.storage.local.get('rkbg:priceLows'))['rkbg:priceLows'];
+    return lows && typeof lows === 'object' ? lows : {};
   },
   'poll-now': () => poll().then(() => true)
 };

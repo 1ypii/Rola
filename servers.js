@@ -540,6 +540,8 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
         statusKey: '',
         savedKey: '',
         watch: null,
+        freeJob: null,
+        freeTimer: 0,
         refreshTimer: 0,
         watchTimer: 0,
         frame: 0,
@@ -586,6 +588,7 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
       const autoLabel = el('span');
       const histogram = createHistogram();
       const status = el('div', { class: 'rk-servers-status', 'aria-live': 'polite' });
+      const waitBanner = el('div', { class: 'rk-servers-wait rk-hidden', 'aria-live': 'polite' });
       const list = el('div', { class: 'rk-servers-list', role: 'list', 'aria-label': 'Public servers' });
       const loadMoreButton = ui.button('Load more', { variant: 'secondary', size: 'md', icon: 'chevronDown', onClick: () => load({ more: true }) });
       const footer = el('div', { class: 'rk-servers-footer rk-servers-opt rk-hidden' }, loadMoreButton);
@@ -616,6 +619,7 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
           summary,
           el('div', { class: 'rk-servers-group' }, el('span', { class: 'rk-servers-auto rk-servers-opt' }, icon('clock', 14), autoLabel), histogram.root)
         ),
+        waitBanner,
         status,
         list,
         footer
@@ -632,10 +636,17 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
           .sort(sorters[prefs.sort] || sorters.players_desc);
       };
 
-      const joinHere = (jobId, server) => join(placeId, jobId, server).then(done => {
-        if (done) scheduleRender();
-        return done;
-      });
+      const joinHere = (jobId, server) => {
+        if (server && isFull(server) && on('joinWhenFree')) {
+          if (state.freeJob === server.id) stopWaiting('Stopped waiting for a slot');
+          else waitFor(server);
+          return Promise.resolve(false);
+        }
+        return join(placeId, jobId, server).then(done => {
+          if (done) scheduleRender();
+          return done;
+        });
+      };
 
       const flash = jobId => {
         const row = state.rows.get(jobId);
@@ -668,6 +679,7 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
 
       const updateRow = (row, server, info) => {
         updateServerRow(row, server);
+        if (isFull(server) && on('joinWhenFree')) setText(row.join.lastElementChild, state.freeJob === server.id ? 'Waiting' : 'Join when free');
         setLabel(row.ping, server.ping === null ? '' : `avg ${fmt.num(server.ping)} ms`, slowPing(server));
         setLabel(row.fps, server.fps === null ? '' : `${server.fps} fps`, lowFps(server));
         setLabel(row.laggy, isLaggy(server) ? 'Laggy' : '');
@@ -890,6 +902,83 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
         state.watchTimer = setTimeout(checkWatch, WATCH_MS);
       };
 
+      const stopWaiting = message => {
+        clearTimeout(state.freeTimer);
+        state.freeTimer = 0;
+        state.freeJob = null;
+        waitBanner.classList.add('rk-hidden');
+        if (message) ui.toast(message);
+        scheduleRender();
+      };
+
+      const planFree = () => {
+        clearTimeout(state.freeTimer);
+        state.freeTimer = 0;
+        if (!state.freeJob || !live()) return;
+        state.freeTimer = setTimeout(checkFree, 3000);
+      };
+
+      const showWaiting = server => {
+        waitBanner.replaceChildren(
+          icon('clock', 16),
+          el('span', null, `Waiting for a slot in this ${playersText(server)} server, you will join as soon as one opens`),
+          ui.button('Cancel', { variant: 'ghost', onClick: () => stopWaiting('Stopped waiting for a slot') })
+        );
+      };
+
+      const waitFor = server => {
+        state.freeJob = server.id;
+        showWaiting(server);
+        waitBanner.classList.remove('rk-hidden');
+        flash(server.id);
+        scheduleRender();
+        planFree();
+      };
+
+      const checkFree = async () => {
+        state.freeTimer = 0;
+        if (!section.isConnected) {
+          detach();
+          return;
+        }
+        const jobId = state.freeJob;
+        if (!jobId || !live()) return;
+        let found = null;
+        let failed = false;
+        let cursor = null;
+        for (let page = 0; page < Math.min(ctx.option('pages'), 5) && !found; page++) {
+          const result = await fetchServers(placeId, 'Public', cursor).catch(() => null);
+          if (!result) {
+            failed = true;
+            break;
+          }
+          found = result.list.find(server => server.id === jobId) || null;
+          cursor = result.next;
+          if (!cursor) break;
+        }
+        if (state.freeJob !== jobId) return;
+        if (!found) {
+          if (failed) planFree();
+          else stopWaiting('That server closed before a slot opened');
+          return;
+        }
+        if (state.servers.has(found.id)) {
+          state.servers.set(found.id, found);
+          scheduleRender();
+        }
+        if (isFull(found)) {
+          showWaiting(found);
+          planFree();
+          return;
+        }
+        stopWaiting();
+        Rk.bg('sound').catch(() => {});
+        ui.toast('A slot opened, joining now', { tone: 'success' });
+        join(placeId, jobId, null).then(done => {
+          if (done) scheduleRender();
+        });
+      };
+
       const load = async ({ more = false } = {}) => {
         if (state.busy || (more && !state.cursor)) return;
         state.busy = true;
@@ -984,7 +1073,8 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
           on('copyLink') && { label: 'Copy invite link', icon: 'link', onClick: () => ui.copy(inviteLink(placeId, server.id), 'Invite link copied') },
           on('copyJobId') && { label: 'Copy job ID', icon: 'copy', onClick: () => ui.copy(server.id, 'Job ID copied') },
           on('saved') && { label: isSaved ? 'Remove from saved' : 'Save server', icon: 'star', onClick: () => toggleSaved(server.id) },
-          on('slotAlert') && (watching || isFull(server)) && { label: watching ? 'Stop notifying' : 'Notify when a slot opens', icon: 'bell', onClick: () => (watching ? unwatch() : watchServer(server)) }
+          on('slotAlert') && (watching || isFull(server)) && { label: watching ? 'Stop notifying' : 'Notify when a slot opens', icon: 'bell', onClick: () => (watching ? unwatch() : watchServer(server)) },
+          on('joinWhenFree') && (state.freeJob === server.id || isFull(server)) && { label: state.freeJob === server.id ? 'Stop waiting' : 'Join when free', icon: 'clock', onClick: () => (state.freeJob === server.id ? stopWaiting('Stopped waiting for a slot') : waitFor(server)) }
         ].filter(Boolean);
         if (items.length) ui.menu(anchor, items);
         else ui.toast('No actions for this server right now');
@@ -1066,6 +1156,7 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
       const onVisibility = () => {
         planRefresh();
         planWatch();
+        planFree();
       };
 
       const onRowsSeen = entries => {
@@ -1084,9 +1175,11 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
 
       const syncSettings = () => {
         section.classList.toggle('rk-hidden', !on('browser'));
+        if (state.freeJob && !on('joinWhenFree')) stopWaiting();
         scheduleRender();
         planRefresh();
         planWatch();
+        planFree();
       };
 
       const detach = () => {
@@ -1099,8 +1192,12 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
         for (const row of state.rows.values()) row.inView = false;
         clearTimeout(state.refreshTimer);
         clearTimeout(state.watchTimer);
+        clearTimeout(state.freeTimer);
         state.refreshTimer = 0;
         state.watchTimer = 0;
+        state.freeTimer = 0;
+        state.freeJob = null;
+        waitBanner.classList.add('rk-hidden');
       };
 
       const attach = () => {
@@ -1810,6 +1907,34 @@ body:has(.rk-servers-browser:not(.rk-hidden)) #rbx-public-running-games {
 .rk-servers-list .rk-servers-row:focus-visible {
   background: var(--rk-hover);
   box-shadow: inset 0 0 0 2px var(--rk-accent);
+}`
+  });
+
+  Rk.feature({
+    id: 'servers.joinWhenFree',
+    category: 'servers',
+    name: 'Join when free',
+    description: 'Lets you pick a full server and joins it the moment a slot opens, checking every few seconds while the page is open.',
+    default: false,
+    pages: ['game'],
+    css: `
+.rk-servers-wait {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: var(--rk-radius);
+  background: var(--rk-accent-soft);
+  color: var(--rk-text-strong);
+  font-size: 13px;
+}
+.rk-servers-wait > span {
+  flex: 1;
+  min-width: 0;
+}
+.rk-servers-wait.rk-hidden {
+  display: none;
 }`
   });
 
