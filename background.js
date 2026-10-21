@@ -1026,9 +1026,9 @@ const handlers = {
   flagged: () => flaggedUsers(),
   admins: () => adminAccounts(),
   bans: () => rolaBans(),
-  'sync-start': async ({ userId } = {}) => {
+  'sync-start': async ({ userId, fresh } = {}) => {
     checkSyncUser(userId);
-    return syncRequest('/api/verify/start', { method: 'POST', body: { userId } });
+    return syncRequest('/api/verify/start', { method: 'POST', body: { userId, fresh: Boolean(fresh) } });
   },
   'sync-check': async ({ userId } = {}) => {
     checkSyncUser(userId);

@@ -1488,36 +1488,50 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       return false;
     }
     return new Promise(resolve => {
-      let done = false;
       const finish = value => {
-        if (done) return;
-        done = true;
+        card.classList.remove('rk-link-card-in');
+        card.addEventListener('transitionend', () => card.remove(), { once: true });
+        setTimeout(() => card.remove(), 400);
         resolve(value);
-        handle.close();
       };
       const check = ui.button('I added it, check now', { variant: 'primary', onClick: async () => {
         check.disabled = true;
         const result = await Rk.bg('sync-check', { userId: me.id }).catch(err => ({ error: err && err.message }));
         check.disabled = false;
         if (result && result.linked) {
-          ui.toast('Account linked, you can remove the code from your About now', { tone: 'success', duration: 6000 });
+          ui.toast('Account linked, you can remove the words from your About now', { tone: 'success', duration: 6000 });
           finish(true);
         } else {
           ui.toast(result && result.error ? result.error : 'Could not check yet, try again', { tone: 'warning', duration: 6000 });
         }
       } });
-      const handle = ui.modal({
-        title: 'Link your Roblox account',
-        width: 460,
-        content: [
-          el('p', { class: 'rk-modal-text' }, 'To share your banner with other Rola users, prove this is your account once. Paste this code anywhere in your Roblox About, save it, then press check. You can remove it right after.'),
-          el('div', { class: 'rk-inline' }, el('code', { class: 'rk-strong', style: { fontSize: '18px' } }, start.code), ui.button('Copy', { variant: 'ghost', icon: 'copy', onClick: () => ui.copy(start.code, 'Code copied') })),
-          el('p', { class: 'rk-modal-text rk-muted' }, 'The code works for 15 minutes.'),
-          el('a', { href: `/users/${me.id}/profile`, target: '_blank' }, 'Open your profile to edit your About')
-        ],
-        actions: [ui.button('Cancel', { variant: 'secondary', size: 'md', onClick: () => finish(false) }), check],
-        onClose: () => finish(false)
-      });
+      const code = el('code', { class: 'rk-link-code' }, start.code);
+      const reroll = ui.button('New words', { variant: 'ghost', onClick: async () => {
+        reroll.disabled = true;
+        const next = await Rk.bg('sync-start', { userId: me.id, fresh: true }).catch(() => null);
+        reroll.disabled = false;
+        if (next && next.code) code.textContent = next.code;
+        else ui.toast('Could not get new words, try again', { tone: 'warning' });
+      } });
+      const minimize = ui.button('', { variant: 'ghost', icon: 'chevronDown', title: 'Minimize', onClick: () => {
+        card.classList.toggle('rk-link-card-min');
+        minimize.title = card.classList.contains('rk-link-card-min') ? 'Expand' : 'Minimize';
+      } });
+      const card = el('div', { class: 'rk-link-card', role: 'dialog', 'aria-label': 'Link your Roblox account' },
+        el('div', { class: 'rk-link-card-head' },
+          el('strong', { class: 'rk-strong' }, 'Link your Roblox account'),
+          el('span', { class: 'rk-inline' }, minimize, ui.button('', { variant: 'ghost', icon: 'close', title: 'Cancel', onClick: () => finish(false) }))
+        ),
+        el('div', { class: 'rk-link-card-body' },
+          el('p', { class: 'rk-modal-text' }, 'Paste these words anywhere in your Roblox About and save it, then press check. You can remove them right after.'),
+          code,
+          el('div', { class: 'rk-inline' }, ui.button('Copy', { variant: 'ghost', icon: 'copy', onClick: () => ui.copy(code.textContent, 'Words copied') }), reroll),
+          el('p', { class: 'rk-modal-text rk-muted' }, 'The words work for 30 minutes. If Roblox turns them into hashtags, press New words.'),
+          check
+        )
+      );
+      document.body.append(card);
+      requestAnimationFrame(() => card.classList.add('rk-link-card-in'));
     });
   };
 
@@ -1534,7 +1548,16 @@ ${nativeCss('counts', '.profile-header-social-counts')}`,
       { key: 'position', label: 'Image focus', type: 'select', choices: [['top', 'Top'], ['center', 'Center'], ['bottom', 'Bottom']], default: 'center' },
       { key: 'share', label: 'Show my banner to other Rola users', type: 'toggle', default: false }
     ],
-    css: bannerCss,
+    css: `${bannerCss}
+.rk-link-card { position: fixed; right: 24px; bottom: 24px; z-index: 2147482000; width: min(360px, calc(100vw - 32px)); border-radius: var(--rk-radius-l); background: var(--rk-bg); color: var(--rk-text); font-family: var(--rk-font); box-shadow: var(--rk-shadow); opacity: 0; transform: translateY(12px); transition: opacity var(--rk-med) var(--rk-ease), transform var(--rk-med) var(--rk-ease); }
+.rk-link-card-in { opacity: 1; transform: translateY(0); }
+.rk-link-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 10px 10px 16px; }
+.rk-link-card-body { display: grid; gap: 10px; padding: 0 16px 16px; overflow: hidden; max-height: 400px; transition: max-height var(--rk-med) var(--rk-ease), padding var(--rk-med) var(--rk-ease), opacity var(--rk-fast) ease; }
+.rk-link-card-min .rk-link-card-body { max-height: 0; padding-bottom: 0; opacity: 0; }
+.rk-link-card-head .rk-btn svg { transition: transform var(--rk-med) var(--rk-ease); }
+.rk-link-card-min .rk-link-card-head .rk-btn:first-child svg { transform: rotate(180deg); }
+.rk-link-code { font-size: 15px; font-weight: 700; user-select: all; }
+`,
     async run(ctx) {
       const onAvatar = Rk.page().type === 'avatar';
       if (!onAvatar && !await ownProfile()) return;
