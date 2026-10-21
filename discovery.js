@@ -10,6 +10,9 @@
 
   const homeStyles = sharedCss(homeIds, `
 .rk-home-rows {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
   font-family: var(--rk-font);
 }
 .rk-home-top {
@@ -585,6 +588,9 @@
     if (!homeWrap) {
       homeWrap = el('div', { class: 'rk-home-rows' });
       Rk.mount(['#HomeContainer', '.home-container', '#content'], homeWrap, { position: 'prepend' });
+      Rk.observe('#HomeContainer, .home-container', container => {
+        if (homeWrap.parentElement !== container) container.prepend(homeWrap);
+      });
     }
     return homeWrap;
   };
