@@ -9,6 +9,11 @@
       "username": "lua",
       "salt": "b9a370d7976b4ee396f74ee9b7f38708",
       "hash": "1ab3b655db60180363acbec7ad88ffbd17a8fb8438f147e06a82131175951034"
+    },
+    {
+      "username": "max",
+      "salt": "b9427344324339c96e594f764c5a6bb9",
+      "hash": "8679788deef315d73dd88bb698350362e4075c66765a7406b386dc922d5ff981"
     }
   ]
 }
