@@ -9,7 +9,7 @@ const DROPS_KEY = 'rkbg:drops';
 const VALUES_URL = 'https://api.rolimons.com/items/v2/itemdetails';
 const VALUES_TTL = 10 * 60 * 1000;
 const POLL_ALARM = 'rk-poll';
-const ALERT_FEATURES = ['tools.friendOnlineAlerts', 'trading.tradeAlerts', 'trading.tradeBadge', 'tools.robuxAlerts', 'tools.unfriendAlerts', 'tools.watchFriend', 'tools.wishlistAlerts', 'tools.gameUpdateAlerts', 'tools.playtime', 'tools.itemDrops', 'tools.terminationWatch', 'trading.resaleAlerts'];
+const ALERT_FEATURES = ['tools.friendOnlineAlerts', 'trading.tradeAlerts', 'trading.tradeBadge', 'tools.robuxAlerts', 'tools.unfriendAlerts', 'tools.watchFriend', 'tools.wishlistAlerts', 'tools.gameUpdateAlerts', 'tools.playtime', 'tools.itemDrops', 'tools.terminationWatch', 'trading.resaleAlerts', 'trading.valueAlerts'];
 
 let valuesMemory = null;
 let valuesRequest = null;
@@ -507,6 +507,60 @@ const pollPriceAlerts = async (data, state) => {
   await chrome.storage.local.set({ 'rkbg:priceLows': lows });
 };
 
+const pollValueChanges = async (userId, state) => {
+  if (Date.now() - (state.valueChangesAt || 0) < 30 * 60 * 1000) return;
+  state.valueChangesAt = Date.now();
+  const owned = new Set();
+  let cursor = '';
+  for (let page = 0; page < 10; page += 1) {
+    const json = await robloxRequest(`https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?limit=100&sortOrder=Asc${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+    for (const item of (json && json.data) || []) {
+      if (Number.isSafeInteger(item.assetId)) owned.add(String(item.assetId));
+    }
+    cursor = json && typeof json.nextPageCursor === 'string' ? json.nextPageCursor : '';
+    if (!cursor) break;
+  }
+  const items = await loadValues();
+  const previous = state.valueSeen && typeof state.valueSeen === 'object' ? state.valueSeen : null;
+  const next = {};
+  const changes = [];
+  for (const id of owned) {
+    const item = items[id];
+    if (!item || item[3] === -1) continue;
+    next[id] = item[4];
+    if (previous && Number.isFinite(previous[id]) && previous[id] !== item[4]) changes.push({ id, name: item[0], from: previous[id], to: item[4] });
+  }
+  state.valueSeen = next;
+  for (const change of changes.slice(0, 5)) {
+    const up = change.to > change.from;
+    notify(cleanText(change.name, 80) || 'Value change', `Value ${up ? 'went up' : 'went down'} from ${change.from.toLocaleString()} to ${change.to.toLocaleString()}`, `https://www.roblox.com/catalog/${change.id}`, undefined, { asset: Number(change.id) });
+  }
+  if (changes.length > 5) notify('Value changes', `${changes.length - 5} more of your items changed value on Rolimons`, 'https://www.roblox.com/home', undefined, null);
+};
+
+const playerCache = new Map();
+
+const rolimonsPlayer = async ({ userId } = {}) => {
+  if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad user id');
+  const cached = playerCache.get(userId);
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.data;
+  const response = await fetch(`https://api.rolimons.com/players/v1/playerinfo/${userId}`, { credentials: 'omit' });
+  if (response.status === 429) throw new Error('rolimons is busy, try again in a minute');
+  const json = await response.json().catch(() => null);
+  const data = json && json.success ? {
+    rank: Number.isFinite(json.rank) ? json.rank : null,
+    value: Number.isFinite(json.value) ? json.value : null,
+    rap: Number.isFinite(json.rap) ? json.rap : null,
+    privacy: json.privacy_enabled === true,
+    lastScan: Number.isFinite(json.last_scan) ? json.last_scan * 1000 : null,
+    lastOnline: Number.isFinite(json.last_online) ? json.last_online * 1000 : null,
+    lastLocation: typeof json.last_location === 'string' ? cleanText(json.last_location, 80) : ''
+  } : null;
+  playerCache.set(userId, { at: Date.now(), data });
+  if (playerCache.size > 100) playerCache.delete(playerCache.keys().next().value);
+  return data;
+};
+
 const pollGameUpdates = async (data, state) => {
   if (Date.now() - (state.gamesAt || 0) < 10 * 60 * 1000) return;
   state.gamesAt = Date.now();
@@ -647,6 +701,8 @@ const poll = async () => {
   else delete state.termsAt;
   if (isOn(settings, 'trading.resaleAlerts')) jobs.push(pollPriceAlerts(data, state));
   else delete state.priceHits;
+  if (isOn(settings, 'trading.valueAlerts')) jobs.push(pollValueChanges(me.id, state));
+  else delete state.valueSeen;
   await Promise.allSettled(jobs);
   await chrome.storage.local.set({ [STATE_KEY]: state });
 };
@@ -1241,6 +1297,7 @@ const handlers = {
     return result;
   },
   'server-region': payload => serverRegion(payload || {}),
+  'rolimons-player': payload => rolimonsPlayer(payload || {}),
   sound: payload => playSound(payload).then(() => true),
   music: () => syncMusic(),
   unfriends: async () => {

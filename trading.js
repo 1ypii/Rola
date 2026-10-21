@@ -894,6 +894,40 @@
   });
 
   Rk.feature({
+    id: 'trading.rolimonsProfile',
+    category: 'trading',
+    name: 'Rolimons player stats',
+    description: 'Shows the Rolimons value rank, when Rolimons last scanned the inventory and when the player was last seen on profiles.',
+    pages: ['profile'],
+    css: inventoryCss,
+    async run() {
+      const userId = Rk.page().id;
+      if (!Rk.isId(userId)) return;
+      const info = await Rk.bg('rolimons-player', { userId }).catch(() => null);
+      if (!info) return;
+      const when = time => (time ? fmt.ago(time) : 'Never');
+      const stats = [
+        ['Value rank', info.rank ? `#${fmt.num(info.rank)}` : 'Unranked'],
+        ['Last scanned', when(info.lastScan)],
+        ['Last seen', info.lastOnline ? `${fmt.ago(info.lastOnline)}${info.lastLocation ? ` · ${info.lastLocation}` : ''}` : 'Unknown']
+      ];
+      if (info.privacy) stats.push(['Inventory', 'Hidden on Rolimons']);
+      (await slot(2)).append(ui.section('Rolimons', ui.stats(stats), {
+        className: 'rk-trading-profile',
+        actions: [ui.button('Open on Rolimons', { variant: 'ghost', icon: 'external', href: `https://www.rolimons.com/player/${userId}`, target: '_blank' })]
+      }));
+    }
+  });
+
+  Rk.feature({
+    id: 'trading.valueAlerts',
+    category: 'trading',
+    name: 'Value change alerts',
+    description: 'Get a notification when Rolimons changes the value of a limited you own, even with the tab closed. Checks every 30 minutes.',
+    default: false
+  });
+
+  Rk.feature({
     id: 'trading.profileTrade',
     category: 'trading',
     name: 'Trade from profiles',
@@ -928,7 +962,7 @@
       const listed = num(asset.recentAveragePrice);
       const rap = Math.max(0, listed === null ? (entry ? entry.rap : 0) : listed);
       const name = [asset.name, asset.itemName, entry && entry.name].find(text => typeof text === 'string' && text) || 'Unknown item';
-      items.push({ assetId, name, serial: Rk.isId(asset.serialNumber) ? Number(asset.serialNumber) : null, rap, value: worth(assetId, rap, values) });
+      items.push({ assetId, name, serial: Rk.isId(asset.serialNumber) ? Number(asset.serialNumber) : null, rap, value: worth(assetId, rap, values), projected: Boolean(entry && entry.projected) });
     }
     const robux = Math.max(0, num(offer && offer.robux) || 0);
     return { items, robux, value: sum(items, item => item.value) + robux, rap: sum(items, item => item.rap) + robux };
@@ -964,7 +998,7 @@
       ui.thumb(Rk.thumb('Asset', item.assetId, '150x150'), { size: 36, alt: '' }),
       el('div', { class: 'rk-trading-side-text' },
         ui.link(`/catalog/${item.assetId}`, item.name),
-        el('div', { class: 'rk-trading-side-meta' }, item.serial ? serialPill(item.serial) : null, el('span', null, `RAP ${fmt.num(item.rap)}`), el('span', null, `Value ${fmt.num(item.value)}`))
+        el('div', { class: 'rk-trading-side-meta' }, item.serial ? serialPill(item.serial) : null, item.projected ? ui.pill('Projected', 'warning', { title: 'RAP is inflated above the usual price' }) : null, el('span', null, `RAP ${fmt.num(item.rap)}`), el('span', null, `Value ${fmt.num(item.value)}`))
       ),
       ui.robux(item.value)
     )),
@@ -1053,7 +1087,8 @@
         record.summary.replaceChildren(
           el('span', { class: 'rk-trading-trade-label' }, 'Give'), ui.robux(details.mine.value, { compact: true }),
           el('span', { class: 'rk-trading-trade-label' }, 'Get'), ui.robux(details.theirs.value, { compact: true }),
-          gainPill(details.mine.value, details.theirs.value)
+          gainPill(details.mine.value, details.theirs.value),
+          details.theirs.items.some(item => item.projected) ? ui.pill('Projected', 'danger', { title: 'You get projected items, their RAP is pumped above what they really sell for' }) : null
         );
         record.inner.replaceChildren(el('div', { class: 'rk-trading-trade-sides' }, tradeSide('You give', details.mine), tradeSide('You get', details.theirs)));
       };
