@@ -1462,6 +1462,26 @@
   cursor: pointer;
 }
 
+.rk-admin-mark {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--rk-accent-soft);
+  color: var(--rk-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rk-settings-titlebar .rk-admin-mark {
+  background: color-mix(in srgb, var(--rk-theme-title-text) 22%, transparent);
+  color: var(--rk-theme-title-text);
+}
+
+.rk-admin-nav-icon {
+  display: inline-flex;
+}
+
 .rk-admin-search {
   display: flex;
   gap: 8px;

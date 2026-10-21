@@ -653,14 +653,28 @@
 
   let adminNode = null;
 
-  const sha256 = async text => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  const adminHash = async (salt, password) => {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: new TextEncoder().encode(salt), iterations: 210000 }, key, 256);
+    return [...new Uint8Array(bits)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  };
 
-  const adminUnlocked = () => {
+  const adminSession = () => {
     try {
-      return sessionStorage.getItem('rk-admin') === '1';
+      return sessionStorage.getItem('rk-admin') || '';
     } catch {
-      return false;
+      return '';
     }
+  };
+
+  const syncAdminUi = () => {
+    if (!panel) return;
+    const name = adminSession();
+    for (const mark of panel.adminMarks) {
+      mark.classList.toggle('rk-hidden', !name);
+      mark.title = name ? `Signed in as ${name}` : '';
+    }
+    panel.adminIcon.replaceChildren(icon(name ? 'unlock' : 'lock', 14));
   };
 
   const adminCard = (title, ...content) => el('section', { class: 'rk-admin-card' },
@@ -865,46 +879,47 @@
         }
         results.replaceChildren(Rk.isId(id) ? await adminProfile(id) : el('div', { class: 'rk-admin-empty' }, 'No user found'));
       };
+      const signOut = () => {
+        try {
+          sessionStorage.removeItem('rk-admin');
+        } catch {}
+        syncAdminUi();
+        showLogin();
+      };
       adminNode.replaceChildren(
-        el('div', { class: 'rk-admin-search' }, field, ui.button('Search', { variant: 'primary', onClick: lookup })),
+        el('div', { class: 'rk-admin-search' }, field, ui.button('Search', { variant: 'primary', onClick: lookup }), ui.button('Sign out', { variant: 'ghost', onClick: signOut })),
         results
       );
     };
     const showLogin = () => {
-      const saved = Rk.store.get('admin.login', null);
-      const creating = !saved || typeof saved.salt !== 'string' || typeof saved.hash !== 'string';
       const user = ui.input({ placeholder: 'Username', maxLength: 40 });
-      const pass = ui.input({ type: 'password', placeholder: 'Password', maxLength: 80 });
+      const pass = ui.input({ type: 'password', placeholder: 'Password', maxLength: 200 });
       const submit = async () => {
         const name = user.value.trim();
-        if (creating) {
-          if (!name || pass.value.length < 4) {
-            ui.toast('Pick a username and a password of at least 4 characters', { tone: 'warning' });
-            return;
-          }
-          const salt = [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, '0')).join('');
-          Rk.store.set('admin.login', { salt, hash: await sha256(`${salt}:${name}:${pass.value}`) });
-        } else if (await sha256(`${saved.salt}:${name}:${pass.value}`) !== saved.hash) {
-          ui.toast('Wrong username or password', { tone: 'danger' });
+        if (!name || !pass.value) return;
+        button.disabled = true;
+        const admins = await Rk.bg('admins').catch(() => null);
+        const entry = Array.isArray(admins) ? admins.find(item => item.username.toLowerCase() === name.toLowerCase()) : null;
+        const ok = entry ? (await adminHash(entry.salt, pass.value)) === entry.hash : false;
+        button.disabled = false;
+        if (!ok) {
+          ui.toast(Array.isArray(admins) ? 'Wrong username or password' : 'Could not reach the admin list', { tone: 'danger' });
           pass.value = '';
           return;
         }
         try {
-          sessionStorage.setItem('rk-admin', '1');
+          sessionStorage.setItem('rk-admin', entry.username);
         } catch {}
+        syncAdminUi();
         showPanel();
       };
+      const button = ui.button('Sign in', { variant: 'primary', onClick: submit });
       pass.addEventListener('keydown', event => {
         if (event.key === 'Enter') submit();
       });
-      adminNode.replaceChildren(adminCard(creating ? 'Create your admin login' : 'Sign in',
-        creating ? el('div', { class: 'rk-admin-empty' }, 'Choose the username and password for this panel. They stay on this browser only.') : null,
-        user,
-        pass,
-        ui.button(creating ? 'Create login' : 'Sign in', { variant: 'primary', onClick: submit })
-      ));
+      adminNode.replaceChildren(adminCard('Sign in', el('div', { class: 'rk-admin-empty' }, 'Admin accounts are given out by the Rola owner.'), user, pass, button));
     };
-    if (adminUnlocked()) showPanel();
+    if (adminSession()) showPanel();
     else showLogin();
     return adminNode;
   };
@@ -1006,12 +1021,14 @@
       navItems.set(category.id, item);
       return item;
     }));
+    const adminIcon = el('span', { class: 'rk-admin-nav-icon' }, icon('lock', 14));
+    const adminMarks = [el('span', { class: 'rk-admin-mark rk-hidden' }, 'Admin'), el('span', { class: 'rk-admin-mark rk-hidden' }, 'Admin')];
     const adminItem = el('button', { type: 'button', class: 'rk-settings-nav-item', onclick: () => {
       activeCategory = 'admin';
       query = '';
       search.value = '';
       renderList();
-    } }, el('span', null, 'Admin'), icon('lock', 14));
+    } }, el('span', null, 'Admin'), adminIcon);
     navItems.set('admin', adminItem);
     nav.append(adminItem);
     const total = el('div');
@@ -1047,13 +1064,13 @@
     );
     const mascot = buildMascot();
     const titlebar = el('div', { class: 'rk-settings-titlebar', title: 'Drag to move, double click to center' },
-      el('span', null, 'Rola Settings'),
+      el('span', { class: 'rk-inline' }, 'Rola Settings', adminMarks[0]),
       el('button', { type: 'button', class: 'rk-settings-titlebar-close', 'aria-label': 'Close', onclick: close }, icon('close', 16))
     );
     const dialog = el('div', { class: 'rk-settings', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Rola settings', tabindex: '-1' },
       titlebar,
       el('aside', { class: 'rk-settings-side' },
-        el('div', { class: 'rk-settings-brand' }, el('span', { class: 'rk-settings-brand-name' }, 'Rola')),
+        el('div', { class: 'rk-settings-brand' }, el('span', { class: 'rk-settings-brand-name' }, 'Rola'), adminMarks[1]),
         el('div', { class: 'rk-settings-search' }, icon('search', 16), search),
         nav,
         mascot,
@@ -1079,7 +1096,7 @@
         close();
       }
     });
-    return { backdrop, dialog, frame, themePicker, themeEdit, mascot, search, counts, navItems, total, title, subtitle, bulk, list, banner, foot, main, previousOverflow: '' };
+    return { backdrop, adminMarks, adminIcon, dialog, frame, themePicker, themeEdit, mascot, search, counts, navItems, total, title, subtitle, bulk, list, banner, foot, main, previousOverflow: '' };
   };
 
   const open = () => {
@@ -1091,6 +1108,7 @@
     }
     theme = storedTheme();
     panel = build();
+    syncAdminUi();
     panel.previousOverflow = document.documentElement.style.overflow;
     document.documentElement.style.overflow = 'hidden';
     renderList();
